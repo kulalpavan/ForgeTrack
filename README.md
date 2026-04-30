@@ -21,54 +21,51 @@ npm run dev
 
 ## Phase 1: Database Setup
 
-Run the SQL files in Supabase SQL Editor **in this order**:
+This project uses a MongoDB database. To initialize the database with seed data:
 
-1. `supabase/schema.sql` — creates all 6 tables, constraints, triggers, helper functions
-2. `supabase/rls.sql` — enables Row Level Security on all tables and sets policies
-3. `supabase/seed.sql` — inserts 25 students, 15 sessions, attendance records, materials, and import log entries
-
-After running, verify with the count check query at the bottom of `seed.sql`.
+1. Ensure your MongoDB connection string is set in `backend/.env`.
+2. Run the seed script:
+```bash
+cd backend
+npm install
+node seed.js
+```
 
 ## Creating User Accounts (Phase 1)
 
-Students and mentors are authenticated via Supabase Auth. After seeding:
+Students and mentors are authenticated via custom JWT authentication. You can generate the required test accounts by running the custom users script:
 
-### Mentor Account
-In Supabase dashboard → Authentication → Users → Add user:
-- Email: `mentor_test@forgetrack.com`
-- Password: password123
-
-Then insert their profile:
-```sql
-INSERT INTO public.users (id, email, role, display_name)
-VALUES ('<auth-user-uuid>', 'nischay@theboringpeople.in', 'mentor', 'Nischay BK');
+```bash
+cd backend
+node add_custom_users.js
 ```
 
-### Co-facilitator Account
+This script will automatically create:
+
+### Mentor Account
 - Email: `mentor_test@forgetrack.com`
-- Same pattern as mentor.
+- Password: `password123`
 
 ### Test Student Account
 - USN: `4SF21CS001`
-- Password: `password123` (USN is default password, student prompted to change on first login)
-
-Create via Supabase Auth → Add user, then run:
-```sql
-SELECT create_student_user_profile(
-  '<auth-user-uuid>',
-  '4SH24CS001@forge.local',
-  1,  -- student_id from students table
-  'Abhishek Sharma'
-);
-```
+- Password: `password123`
 
 ## Environment Variables
 
+You need to configure environment variables for both the backend and frontend.
+
+**Backend (`backend/.env`):**
 | Variable | Description |
 |---|---|
-| `VITE_SUPABASE_URL` | Your Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anon/public API key |
-| `VITE_GEMINI_API_KEY` | Google Gemini API key (needed for Phase 4 CSV agent) |
+| `MONGO_URI` | Your MongoDB connection string |
+| `JWT_SECRET` | Secret key for signing JWT tokens |
+| `PORT` | Backend server port (default: 5000) |
+| `GEMINI_API_KEY` | Google Gemini API key (needed for Phase 4 CSV agent) |
+
+**Frontend (`frontend/.env.local`):**
+| Variable | Description |
+|---|---|
+| `VITE_API_URL` | URL of the backend API (e.g., `http://localhost:5000/api`) |
 
 ## Build Phases
 

@@ -35,8 +35,8 @@ Students and mentors are authenticated via Supabase Auth. After seeding:
 
 ### Mentor Account
 In Supabase dashboard → Authentication → Users → Add user:
-- Email: `nischay@theboringpeople.in`
-- Password: (set securely)
+- Email: `mentor_test@forgetrack.com`
+- Password: password123
 
 Then insert their profile:
 ```sql
@@ -45,12 +45,12 @@ VALUES ('<auth-user-uuid>', 'nischay@theboringpeople.in', 'mentor', 'Nischay BK'
 ```
 
 ### Co-facilitator Account
-- Email: `varun@theboringpeople.in`
+- Email: `mentor_test@forgetrack.com`
 - Same pattern as mentor.
 
 ### Test Student Account
-- Email: `4SH24CS001@forge.local` (auto-generated from USN)
-- Password: `4SH24CS001` (USN is default password, student prompted to change on first login)
+- USN: `4SF21CS001`
+- Password: `password123` (USN is default password, student prompted to change on first login)
 
 Create via Supabase Auth → Add user, then run:
 ```sql

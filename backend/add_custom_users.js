@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const dns = require('dns');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+// Fix for querySrv ECONNREFUSED
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 const User = require('./models/User');
 const Student = require('./models/Student');

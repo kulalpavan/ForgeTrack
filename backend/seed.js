@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const dns = require('dns');
 require('dotenv').config();
+
+// Fix for querySrv ECONNREFUSED
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 const User = require('./models/User');
 const Student = require('./models/Student');

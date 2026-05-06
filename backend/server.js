@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const dns = require('dns');
 require('dotenv').config();
+
+// Fix for querySrv ECONNREFUSED in certain environments
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 const User = require('./models/User');
 const Student = require('./models/Student');
@@ -14,6 +18,7 @@ const ActivityLog = require('./models/ActivityLog');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -33,7 +38,7 @@ async function logActivity(userId, action, details) {
 }
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/forgetrack')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/forgetrack')
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.log('Connection Error:', err));
 
@@ -53,17 +58,24 @@ app.post('/api/auth/login', async (req, res) => {
       ]
     }).populate('studentId');
 
-    if (!user) return res.status(400).json({ msg: 'Invalid Credentials' });
+    if (!user) {
+      return res.status(400).json({ msg: 'Invalid Credentials' });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ msg: 'Invalid Credentials' });
+    if (!isMatch) {
+      return res.status(400).json({ msg: 'Invalid Credentials' });
+    }
 
     const payload = {
       user: { id: user.id, role: user.role, studentId: user.studentId?._id }
     };
 
     jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
-      if (err) throw err;
+      if (err) {
+        console.error('JWT Signing Error:', err);
+        return res.status(500).json({ msg: 'Server Error' });
+      }
       res.json({ token, user: { 
         id: user.id, 
         email: user.email, 

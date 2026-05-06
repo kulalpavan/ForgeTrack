@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Calendar, CheckSquare, Users, Save, AlertCircle, Loader } from 'lucide-react';
+import { Calendar, CheckSquare, Users, Save, AlertCircle, Loader, Search as SearchIcon, ChevronLeft, ChevronRight, Lock, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { useToast } from '../lib/ToastContext';
 
 function getTodayString() {
   const d = new Date();
@@ -10,14 +11,21 @@ function getTodayString() {
 
 export default function Attendance() {
   const { displayName } = useOutletContext();
-  const [date, setDate] = useState(getTodayString());
+  const { showToast } = useToast();
+  
+  const todayStr = getTodayString();
+  const [date, setDate] = useState(todayStr);
+  const [currentMonth, setCurrentMonth] = useState(() => new Date(todayStr));
+  
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [search, setSearch] = useState('');
+  const searchInputRef = useRef(null);
   
   // Data state
   const [students, setStudents] = useState([]);
   const [session, setSession] = useState(null);
+  const [allSessions, setAllSessions] = useState([]);
   
   // Form state
   const [topic, setTopic] = useState('');
@@ -28,31 +36,43 @@ export default function Attendance() {
   const [attendanceState, setAttendanceState] = useState({});
   const [hasExistingAttendance, setHasExistingAttendance] = useState(false);
 
+  // Derived calendar properties
+  const isPast = date < todayStr;
+  const isFuture = date > todayStr;
+  const isToday = date === todayStr;
+
   useEffect(() => {
     loadData(date);
   }, [date]);
 
+  useEffect(() => {
+    const handleKeys = (e) => {
+      if (e.key.toLowerCase() === 's' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeys);
+    return () => window.removeEventListener('keydown', handleKeys);
+  }, []);
+
   async function loadData(targetDate) {
     setLoading(true);
-    setMessage('');
     try {
-      // 1. Fetch active students
       const stds = await api.getStudents();
       setStudents(stds || []);
 
-      // 2. Fetch session for date
       const sessions = await api.getSessions();
+      setAllSessions(sessions || []);
+
       const ses = sessions.find(s => s.date.split('T')[0] === targetDate);
       setSession(ses);
 
-      // 3. Setup default state
       const newState = {};
-      stds?.forEach(s => newState[s._id] = true); // default to present
+      stds?.forEach(s => newState[s._id] = true); // Default present if today
 
       if (ses) {
-        // If session exists, fetch attendance
         const att = await api.getAttendance(ses._id);
-          
         if (att && att.length > 0) {
           setHasExistingAttendance(true);
           att.forEach(a => {
@@ -60,40 +80,46 @@ export default function Attendance() {
           });
         } else {
           setHasExistingAttendance(false);
+          // If past and no attendance, default to absent so they don't look "Present" magically
+          if (targetDate < todayStr) stds?.forEach(s => newState[s._id] = false);
         }
       } else {
         setHasExistingAttendance(false);
         setTopic('');
+        if (targetDate < todayStr) stds?.forEach(s => newState[s._id] = false);
       }
-
       setAttendanceState(newState);
     } catch (err) {
       console.error(err);
-      setMessage('Failed to load data.');
+      showToast('Failed to load data.', 'error');
     } finally {
       setLoading(false);
     }
   }
 
   function toggleAttendance(studentId) {
+    if (isPast || isFuture) return;
     setAttendanceState(prev => ({ ...prev, [studentId]: !prev[studentId] }));
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setMessage('');
+  function markAll(present) {
+    if (isPast || isFuture) return;
+    const ns = {};
+    students.forEach(s => ns[s._id] = present);
+    setAttendanceState(ns);
+  }
 
+  async function handleSave() {
+    if (isPast || isFuture) return;
+    setSaving(true);
     try {
       let currentSessionId = session?._id;
-
-      // 1. Create session if it doesn't exist
       if (!currentSessionId) {
         if (!topic.trim()) {
-          setMessage('Topic is required for a new session.');
+          showToast('Topic is required for a new session.', 'warning');
           setSaving(false);
           return;
         }
-
         const newSes = await api.fetch('/sessions', {
           method: 'POST',
           body: JSON.stringify({
@@ -108,9 +134,6 @@ export default function Attendance() {
         setSession(newSes);
       }
 
-      // 2. Upsert attendance
-      // Note: Backend currently handles single upsert. We'll loop or update backend.
-      // Let's loop for now to avoid server.js rewrite until later.
       for (const studentId of Object.keys(attendanceState)) {
         await api.upsertAttendance({
           studentId,
@@ -119,202 +142,257 @@ export default function Attendance() {
         });
       }
 
-      setMessage('Attendance saved successfully!');
+      showToast('Attendance saved successfully!', 'success');
       setHasExistingAttendance(true);
-      setTimeout(() => setMessage(''), 3000);
+      // Reload sessions to update calendar dots
+      const sessions = await api.getSessions();
+      setAllSessions(sessions || []);
     } catch (err) {
       console.error(err);
-      setMessage('Error saving attendance: ' + err.message);
+      showToast('Error saving attendance: ' + err.message, 'error');
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleDeleteSession() {
+    if (!session) return;
+    if (!window.confirm(`Are you sure you want to delete the session "${session.topic}"? This will also delete all attendance records for this session. This action cannot be undone.`)) return;
+
+    setSaving(true);
+    try {
+      await api.deleteSession(session._id);
+      showToast('Session deleted successfully', 'success');
+      
+      // Reset state
+      setSession(null);
+      setTopic('');
+      setHasExistingAttendance(false);
+      
+      // Update calendar dots
+      const sessions = await api.getSessions();
+      setAllSessions(sessions || []);
+      
+      // Clear attendance selection visually
+      const ns = {};
+      students.forEach(s => ns[s._id] = false);
+      setAttendanceState(ns);
+      
+    } catch (err) {
+      console.error(err);
+      showToast('Error deleting session', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filteredStudents = students.filter(s => 
+    s.name.toLowerCase().includes(search.toLowerCase()) || 
+    s.usn.toLowerCase().includes(search.toLowerCase())
+  );
+
   const presentCount = Object.values(attendanceState).filter(Boolean).length;
   const totalCount = students.length;
 
+  // Calendar rendering logic
+  function prevMonth() {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  }
+  function nextMonth() {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+  }
+
+  const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+  const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+  const days = Array(firstDay).fill(null).concat(Array.from({length: daysInMonth}, (_, i) => i + 1));
+  const sessionDates = new Set(allSessions.map(s => s.date.split('T')[0]));
+
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-      {/* Header */}
+    <div style={{ maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
       <div style={{ marginBottom: '32px' }}>
         <p className="text-label text-tertiary" style={{ marginBottom: 'var(--space-2)' }}>ACTIVITY</p>
         <h1 className="text-h1 text-primary">Mark Attendance</h1>
         <p className="text-body text-secondary" style={{ marginTop: '8px' }}>
-          Select a date, configure the session, and mark students present or absent.
+          Select a date — past sessions are read-only, today is editable, future dates are locked.
         </p>
       </div>
 
-      {/* Message Banner */}
-      {message && (
-        <div style={{
-          padding: '16px', borderRadius: 'var(--radius-md)', marginBottom: '24px',
-          background: message.includes('success') ? 'var(--success-bg)' : 'var(--danger-bg)',
-          border: `1px solid ${message.includes('success') ? 'var(--success-border)' : 'var(--danger-border)'}`,
-          color: message.includes('success') ? 'var(--success-fg)' : 'var(--danger-fg)',
-          display: 'flex', alignItems: 'center', gap: '8px'
-        }}>
-          <AlertCircle size={18} />
-          <p className="text-body-sm font-medium">{message}</p>
-        </div>
-      )}
-
-      {/* Date & Session Config */}
-      <div className="card" style={{ marginBottom: '32px' }}>
-        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-          
-          {/* Date Picker */}
-          <div style={{ flex: '1', minWidth: '200px' }}>
-            <label className="label">Session Date</label>
-            <input 
-              type="date" 
-              className="input" 
-              value={date} 
-              onChange={e => setDate(e.target.value)}
-              max={getTodayString()}
-              min="2025-08-04"
-            />
+      {/* Calendar Card */}
+      <div className="card" style={{ marginBottom: '24px', padding: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <span className="text-body-lg font-medium text-primary">
+            {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn-secondary" style={{ padding: '6px', height: 'auto' }} onClick={prevMonth}>
+              <ChevronLeft size={16} />
+            </button>
+            <button className="btn-secondary" style={{ padding: '6px', height: 'auto' }} onClick={nextMonth}>
+              <ChevronRight size={16} />
+            </button>
           </div>
+        </div>
 
-          {/* Session Details */}
-          {loading ? (
-            <div style={{ flex: '2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Loader className="text-tertiary" size={24} style={{ animation: 'spin 1s linear infinite' }} />
-            </div>
-          ) : session ? (
-           <div style={{ flex: '2', minWidth: '300px' }}>
-               <label className="label">Session Topic</label>
-               <input className="input" value={session.topic} disabled style={{ background: 'var(--bg-surface-inset)' }} />
-               <p className="text-caption text-tertiary" style={{ marginTop: '8px' }}>
-                 {session.duration_hours || session.duration || '2.0'} hours • {(session.session_type || session.sessionType || 'offline').toUpperCase()}
-               </p>
-             </div>
-          ) : (
-            <div style={{ flex: '2', minWidth: '300px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label className="label">New Session Topic <span className="text-danger">*</span></label>
-                <input 
-                  className="input" 
-                  placeholder="e.g. LangChain Fundamentals" 
-                  value={topic} 
-                  onChange={e => setTopic(e.target.value)} 
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '16px' }}>
-                <div style={{ flex: 1 }}>
-                  <label className="label">Type</label>
-                  <select className="input" value={sessionType} onChange={e => setSessionType(e.target.value)}>
-                    <option value="offline">Offline</option>
-                    <option value="online">Online</option>
-                  </select>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', textAlign: 'center' }}>
+          {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => (
+            <div key={d} className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>{d}</div>
+          ))}
+          {days.map((d, i) => {
+            if (!d) return <div key={`empty-${i}`} />;
+            
+            const cellDateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const isCellSelected = cellDateStr === date;
+            const isCellToday = cellDateStr === todayStr;
+            const hasSession = sessionDates.has(cellDateStr);
+            const isCellFuture = cellDateStr > todayStr;
+            
+            return (
+              <div 
+                key={`day-${d}`} 
+                onClick={() => setDate(cellDateStr)}
+                style={{ 
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', cursor: 'pointer',
+                  padding: '8px 0',
+                  opacity: isCellFuture ? 0.3 : 1
+                }}
+              >
+                <div style={{
+                  width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '50%',
+                  background: isCellSelected ? (isCellToday ? 'var(--accent-glow)' : 'var(--text-primary)') : (isCellToday ? 'var(--bg-surface-raised)' : 'transparent'),
+                  color: isCellSelected ? (isCellToday ? 'var(--text-primary)' : 'var(--bg-void)') : (isCellToday ? 'var(--text-primary)' : 'var(--text-secondary)'),
+                  fontWeight: isCellSelected || isCellToday ? '600' : '400',
+                  border: isCellToday && !isCellSelected ? '1px solid var(--border-default)' : 'none'
+                }}>
+                  {d}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <label className="label">Duration (hrs)</label>
-                  <input className="input" type="number" step="0.5" value={duration} onChange={e => setDuration(e.target.value)} />
-                </div>
+                {/* Dot */}
+                {!isCellFuture && (
+                  <div style={{
+                    width: '4px', height: '4px', borderRadius: '50%',
+                    background: hasSession ? 'var(--success-fg)' : 'var(--text-tertiary)'
+                  }} />
+                )}
               </div>
-            </div>
-          )}
+            );
+          })}
         </div>
       </div>
 
-      {/* Student List */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ 
-          padding: '20px 24px', 
-          borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: 'var(--bg-surface-raised)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={18} className="text-tertiary" />
-            <h2 className="text-h3 text-primary">Student Roster</h2>
+      {/* State Alerts */}
+      {isPast && (
+        <div style={{ padding: '16px', background: 'var(--bg-surface-inset)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <AlertCircle size={18} className="text-tertiary" />
+          <span className="text-body-sm text-secondary">Viewing past session — <span className="text-primary font-medium">read-only</span>. Changes are locked.</span>
+        </div>
+      )}
+      {isFuture && (
+        <div style={{ padding: '16px', background: 'var(--bg-surface-inset)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Lock size={18} className="text-warning" />
+          <span className="text-body-sm text-secondary">Viewing future date — <span className="text-primary font-medium">locked</span>. You cannot mark attendance yet.</span>
+        </div>
+      )}
+
+      {/* Inputs block */}
+      <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', marginBottom: '32px', opacity: isFuture ? 0.5 : 1, pointerEvents: isFuture ? 'none' : 'auto' }}>
+        <div style={{ flex: '1', minWidth: '200px' }}>
+          <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>SESSION DATE</p>
+          <div className="input" style={{ background: 'var(--bg-surface-inset)', display: 'flex', alignItems: 'center', color: 'var(--text-primary)' }}>
+            {new Date(date).toLocaleDateString('en-GB').replace(/\//g, '-')} <Calendar size={14} className="text-tertiary" style={{ marginLeft: 'auto' }} />
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ flex: '2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Loader className="text-tertiary spin" size={24} />
+          </div>
+        ) : session ? (
+          <div style={{ flex: '2', minWidth: '300px' }}>
+             <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>SESSION TOPIC</p>
+             <input className="input" value={session.topic} disabled style={{ background: 'var(--bg-surface-inset)' }} />
+             <p className="text-caption text-tertiary" style={{ marginTop: '8px' }}>
+               {session.duration_hours || session.duration || '2.0'} hours • {(session.session_type || session.sessionType || 'offline').toUpperCase()}
+             </p>
+           </div>
+        ) : (
+          <div style={{ flex: '2', minWidth: '300px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+             <div>
+               <p className="text-micro text-accent" style={{ marginBottom: '8px', fontWeight: '600' }}>CREATE NEW SESSION</p>
+               <input className="input" placeholder={isPast ? "No session recorded for this past date" : "e.g. LangChain Fundamentals"} value={topic} onChange={e => setTopic(e.target.value)} disabled={isPast} style={{ background: isPast ? 'var(--bg-surface-inset)' : 'var(--bg-canvas)' }} />
+             </div>
+             {!isPast && (
+               <div style={{ display: 'flex', gap: '16px' }}>
+                 <div style={{ flex: 1 }}>
+                   <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>TYPE</p>
+                   <select className="input" value={sessionType} onChange={e => setSessionType(e.target.value)}>
+                     <option value="offline">Offline</option>
+                     <option value="online">Online</option>
+                   </select>
+                 </div>
+                 <div style={{ flex: 1 }}>
+                   <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>DURATION (HRS)</p>
+                   <input className="input" type="number" step="0.5" value={duration} onChange={e => setDuration(e.target.value)} />
+                 </div>
+               </div>
+             )}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden', opacity: isFuture ? 0.5 : 1, pointerEvents: isFuture ? 'none' : 'auto' }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-surface-raised)', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ position: 'relative' }}>
+              <SearchIcon size={16} className="text-tertiary" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input 
+                ref={searchInputRef}
+                className="input" 
+                placeholder="Search students... (S)" 
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ height: '36px', paddingLeft: '36px', width: '240px', fontSize: '13px', background: 'var(--bg-canvas)' }}
+              />
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ display: 'flex', gap: '8px', marginRight: '16px' }}>
-              <button 
-                className="btn-secondary" 
-                style={{ padding: '6px 10px', fontSize: '11px', height: '28px' }}
-                onClick={() => {
-                  const newState = {};
-                  students.forEach(s => newState[s._id] = true);
-                  setAttendanceState(newState);
-                }}
-              >
-                All Present
-              </button>
-              <button 
-                className="btn-secondary" 
-                style={{ padding: '6px 10px', fontSize: '11px', height: '28px' }}
-                onClick={() => {
-                  const newState = {};
-                  students.forEach(s => newState[s._id] = false);
-                  setAttendanceState(newState);
-                }}
-              >
-                All Absent
-              </button>
+              <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '11px', height: '28px', opacity: isPast ? 0.5 : 1 }} onClick={() => markAll(true)} disabled={isPast}>All Present</button>
+              <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '11px', height: '28px', opacity: isPast ? 0.5 : 1 }} onClick={() => markAll(false)} disabled={isPast}>All Absent</button>
             </div>
-            <span className="text-body-sm text-secondary">
-              {presentCount} of {totalCount} Present
-            </span>
-            <div style={{ width: '100px', height: '6px', background: 'var(--bg-surface-inset)', borderRadius: '999px', overflow: 'hidden' }}>
-              <div style={{ 
-                height: '100%', 
-                width: totalCount ? `${(presentCount / totalCount) * 100}%` : '0%', 
-                background: 'var(--success-fg)', 
-                transition: 'width 0.3s' 
-              }} />
+            <span className="text-body-sm text-secondary">{presentCount}/{totalCount}</span>
+            <div style={{ width: '80px', height: '4px', background: 'var(--bg-surface-inset)', borderRadius: '999px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: totalCount ? `${(presentCount / totalCount) * 100}%` : '0%', background: 'var(--success-fg)', transition: 'width 0.3s' }} />
             </div>
           </div>
         </div>
 
         {loading ? (
-           <div style={{ padding: '40px', textAlign: 'center' }}>
-             <Loader className="text-tertiary" size={32} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
-             <p className="text-body text-secondary">Loading roster...</p>
+           <div style={{ padding: '80px', textAlign: 'center' }}>
+             <Loader className="text-tertiary spin" size={32} style={{ margin: '0 auto' }} />
            </div>
-        ) : students.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center' }}>
-             <p className="text-body text-secondary">No active students found.</p>
+        ) : filteredStudents.length === 0 ? (
+          <div style={{ padding: '80px', textAlign: 'center' }}>
+             <p className="text-body text-secondary">No students found matching "{search}"</p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {students.map((s, i) => (
-              <div 
-                key={s._id} 
-                onClick={() => toggleAttendance(s._id)}
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  padding: '16px 24px',
-                  borderBottom: i < students.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-surface-inset)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
+            {filteredStudents.map((s, i) => (
+              <div key={s._id} onClick={() => toggleAttendance(s._id)} style={{ display: 'flex', alignItems: 'center', padding: '16px 24px', borderBottom: i < filteredStudents.length - 1 ? '1px solid var(--border-subtle)' : 'none', cursor: isPast || isFuture ? 'default' : 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => { if (!isPast && !isFuture) e.currentTarget.style.background = 'var(--bg-surface-inset)' }} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-glow-soft)', border: '1px solid rgba(99,102,241,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: 'var(--accent-glow)', marginRight: '16px', fontWeight: '600' }}>
+                  {s.name.substring(0, 2).toUpperCase()}
+                </div>
                 <div style={{ flex: 1 }}>
                   <p className="text-body font-medium text-primary">{s.name}</p>
-                  <p className="text-caption text-tertiary">{s.usn}</p>
+                  <p className="text-caption text-tertiary font-mono">{s.usn}</p>
                 </div>
-                
-                {/* Custom Checkbox Pill */}
-                <div style={{
-                  padding: '6px 12px',
-                  borderRadius: 'var(--radius-full)',
-                  border: `1px solid ${attendanceState[s._id] ? 'var(--success-border)' : 'var(--danger-border)'}`,
-                  background: attendanceState[s._id] ? 'var(--success-bg)' : 'var(--danger-bg)',
-                  color: attendanceState[s._id] ? 'var(--success-fg)' : 'var(--danger-fg)',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  width: '90px',
-                  textAlign: 'center',
-                  transition: 'all 0.2s',
+                <div style={{ 
+                  padding: '6px 12px', 
+                  borderRadius: 'var(--radius-md)', 
+                  border: `1px solid ${attendanceState[s._id] ? (isPast ? 'var(--border-subtle)' : 'var(--success-border)') : 'var(--border-subtle)'}`, 
+                  background: attendanceState[s._id] ? (isPast ? 'transparent' : 'var(--success-bg)') : 'transparent', 
+                  color: attendanceState[s._id] ? (isPast ? 'var(--text-secondary)' : 'var(--success-fg)') : 'var(--text-tertiary)', 
+                  fontSize: '12px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em', width: '90px', textAlign: 'center', transition: 'all 0.2s',
+                  opacity: isPast ? 0.8 : 1
                 }}>
                   {attendanceState[s._id] ? 'Present' : 'Absent'}
                 </div>
@@ -324,38 +402,50 @@ export default function Attendance() {
         )}
       </div>
 
-      {/* Action Bar */}
-      <div style={{ 
-        marginTop: '32px', 
-        display: 'flex', 
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '24px',
-        background: 'var(--bg-surface)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--border-default)',
-        boxShadow: 'var(--shadow-raised)'
-      }}>
-        <div>
-          {hasExistingAttendance && (
-            <p className="text-body-sm text-warning" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <AlertCircle size={16} /> Modifying existing attendance
+      {isPast ? (
+        <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-default)', boxShadow: 'var(--shadow-raised)' }}>
+          <div>
+            <p className="text-body-sm text-warning" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertCircle size={16} /> Read-only — contact admin to modify past records
             </p>
-          )}
+          </div>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            {session && (
+              <button className="btn-secondary" onClick={handleDeleteSession} disabled={saving} style={{ color: 'var(--danger-fg)', borderColor: 'var(--danger-border)', background: 'var(--danger-bg)' }}>
+                <Trash2 size={16} /> Delete
+              </button>
+            )}
+            <button className="btn-secondary" disabled style={{ minWidth: '160px', justifyContent: 'center', opacity: 0.5 }}>
+              <Lock size={16} /> Locked
+            </button>
+          </div>
         </div>
-        <button 
-          className="btn-primary" 
-          onClick={handleSave} 
-          disabled={loading || saving}
-          style={{ minWidth: '160px', justifyContent: 'center' }}
-        >
-          {saving ? <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={16} />}
-          Save Attendance
-        </button>
-      </div>
+      ) : !isFuture && (
+        <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-default)', boxShadow: 'var(--shadow-raised)' }}>
+          <div>
+            {hasExistingAttendance ? (
+              <p className="text-body-sm text-warning" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><AlertCircle size={16} /> Modifying existing attendance</p>
+            ) : (
+              <p className="text-body-sm text-info" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><CheckSquare size={16} /> Saving will create a new session</p>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            {session && (
+              <button className="btn-secondary" onClick={handleDeleteSession} disabled={saving} style={{ color: 'var(--danger-fg)', borderColor: 'var(--danger-border)', background: 'var(--danger-bg)' }}>
+                <Trash2 size={16} /> Delete
+              </button>
+            )}
+            <button className="btn-primary" onClick={handleSave} disabled={loading || saving} style={{ minWidth: '160px', justifyContent: 'center' }}>
+              {saving ? <Loader size={16} className="spin" /> : <Save size={16} />}
+              {session ? 'Update Attendance' : 'Create & Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
       `}</style>
     </div>
   );

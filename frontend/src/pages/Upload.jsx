@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Upload as UploadIcon, CheckCircle2, Sparkles, Loader } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Upload as UploadIcon, CheckCircle2, Sparkles, Loader, FileText, Brain, Database, Check } from 'lucide-react';
 import Papa from 'papaparse';
 import { api } from '../lib/api';
+import { useToast } from '../lib/ToastContext';
 
 export default function Upload() {
   const [step, setStep] = useState(1);
@@ -11,10 +12,13 @@ export default function Upload() {
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [mappingInfo, setMappingInfo] = useState(null);
   const [validatedData, setValidatedData] = useState([]);
+  const { showToast } = useToast();
   
-  // Loading states
+  // Loading & Progress states
   const [processingAi, setProcessingAi] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0); // 0 to 100
+  const [importStatus, setImportStatus] = useState(''); // text description
   const [importResult, setImportResult] = useState(null);
   const [error, setError] = useState('');
 
@@ -30,13 +34,18 @@ export default function Upload() {
     if (!selectedFile) return;
     
     setFile(selectedFile);
+    setImportStatus('Reading file...');
     Papa.parse(selectedFile, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
         setCsvHeaders(results.meta.fields || []);
         setCsvData(results.data);
+        showToast('File read successfully', 'success');
         setStep(2);
+      },
+      error: (err) => {
+        showToast('Failed to parse CSV: ' + err.message, 'error');
       }
     });
   };
@@ -44,41 +53,33 @@ export default function Upload() {
   const askAiAgent = async () => {
     setProcessingAi(true);
     setError('');
+    setImportStatus('AI Agent is analyzing headers...');
     try {
-      // Send headers and first 5 rows to Gemini API
       const sample = csvData.slice(0, 5);
       const result = await api.mapCsv(csvHeaders, sample);
       setMappingInfo(result);
       processMappedData(result);
+      showToast('AI Mapping complete', 'success');
       setStep(3);
     } catch (err) {
       console.error(err);
       setError('AI Mapping failed. ' + err.message);
+      showToast('AI Agent failed to map columns', 'error');
     } finally {
       setProcessingAi(false);
     }
   };
 
-  /**
-   * Parses messy date strings from Forge CSV exports into YYYY-MM-DD.
-   * Handles: DD/M/YY  DD/MM/YY  DD/MM/YYYY  DD-MMM  YYYY-MM-DD
-   */
   function parseDateString(raw) {
     if (!raw) return null;
     const s = String(raw).trim();
-
-    // Already ISO: 2026-04-15
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-    // DD/M/YY or DD/MM/YY or DD/MM/YYYY or DD-MM-YYYY
     const slash = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (slash) {
       let [, d, m, y] = slash;
-      if (y.length === 2) y = '20' + y;       // 26 → 2026
+      if (y.length === 2) y = '20' + y;
       return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
     }
-
-    // DD-MMM (e.g. 15-Apr)  — assumes current year
     const dashMon = s.match(/^(\d{1,2})-([A-Za-z]{3})$/);
     if (dashMon) {
       const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
@@ -88,72 +89,39 @@ export default function Upload() {
         return `${y}-${String(m).padStart(2,'0')}-${dashMon[1].padStart(2,'0')}`;
       }
     }
-
-    // Last resort — let JS try and reformat
     const d = new Date(s);
     if (!isNaN(d)) return d.toISOString().split('T')[0];
-
-    return null; // unparseable
+    return null;
   }
 
   const processMappedData = (info) => {
     const records = [];
     const mapping = info.mapping || {};
-    console.log('[Upload] AI Mapping received:', mapping);
-    console.log('[Upload] is_pivoted:', info.is_pivoted);
-    
-    // Convert to standard format
     csvData.forEach((row, index) => {
-      // Build a safe row object with lowercase keys to match against AI mapping keys safely
       const lowerRow = {};
-      Object.keys(row).forEach(k => {
-        lowerRow[k.trim().toLowerCase()] = row[k];
-      });
-
-      // Build a safe mapping object with lowercase keys
+      Object.keys(row).forEach(k => { lowerRow[k.trim().toLowerCase()] = row[k]; });
       const safeMapping = {};
-      Object.keys(mapping).forEach(k => {
-        safeMapping[k.trim().toLowerCase()] = String(mapping[k]).toLowerCase();
-      });
-
-      // Find USN
+      Object.keys(mapping).forEach(k => { safeMapping[k.trim().toLowerCase()] = String(mapping[k]).toLowerCase(); });
       let usn = '';
-      Object.keys(safeMapping).forEach(k => {
-        if (safeMapping[k] === 'usn') usn = lowerRow[k];
-      });
-
-      if (!usn) {
-        console.warn(`[Upload] Row ${index} skipped: Missing USN. Row data:`, lowerRow);
-        return; // Skip if no USN
-      }
+      Object.keys(safeMapping).forEach(k => { if (safeMapping[k] === 'usn') usn = lowerRow[k]; });
+      if (!usn) return;
       usn = usn.toString().toUpperCase().trim();
-
       if (info.is_pivoted) {
-        // Unpivot dates
         Object.keys(safeMapping).forEach(colName => {
           if (safeMapping[colName] === 'date') {
             const val = lowerRow[colName];
             if (val === undefined || val === null || val === '') return;
-
-            // In pivoted, the column name IS the date. Find the original case header for parsing
             const originalHeader = Object.keys(row).find(orig => orig.trim().toLowerCase() === colName);
             const isoDate = parseDateString(originalHeader || colName);
-            
-            if (!isoDate) {
-              console.warn('Could not parse date header:', originalHeader);
-              return;
-            }
-
+            if (!isoDate) return;
             const vStr = String(val).toUpperCase().trim();
             const present = ['TRUE', 'P', 'PRESENT', '1', 'Y', 'YES'].includes(vStr);
             records.push({ usn, date: isoDate, present, status: 'valid' });
           }
         });
       } else {
-        // Standard format
         let dateVal = '';
         let presentVal = false;
-        
         Object.keys(safeMapping).forEach(k => {
           if (safeMapping[k] === 'date') dateVal = lowerRow[k];
           if (safeMapping[k] === 'attendance_status') {
@@ -161,39 +129,39 @@ export default function Upload() {
             presentVal = ['TRUE', 'P', 'PRESENT', '1', 'Y', 'YES'].includes(vStr);
           }
         });
-
-        if (!dateVal) {
-          console.warn(`[Upload] Row ${index}: Mapping did not assign 'date'. Falling back to today's date.`);
-          dateVal = new Date().toISOString().split('T')[0];
-        }
-
+        if (!dateVal) dateVal = new Date().toISOString().split('T')[0];
         const isoDate = parseDateString(dateVal);
-        if (isoDate) {
-          records.push({ usn, date: isoDate, present: presentVal, status: 'valid' });
-        } else {
-          console.warn(`[Upload] Row ${index} skipped: parseDateString failed for dateVal:`, dateVal);
-        }
+        if (isoDate) records.push({ usn, date: isoDate, present: presentVal, status: 'valid' });
       }
     });
-
-    console.log(`[Upload] Processed ${records.length} attendance records from ${csvData.length} CSV rows`);
     setValidatedData(records);
   };
 
   const startImport = async () => {
     setStep(4);
     setImporting(true);
+    setImportProgress(10);
+    setImportStatus('Analyzing records...');
     
     try {
+      // Simulate steps for better UX
+      await new Promise(r => setTimeout(r, 800));
+      setImportProgress(40);
+      setImportStatus(`Preparing to import ${validatedData.length} records...`);
+      await new Promise(r => setTimeout(r, 800));
+      setImportProgress(70);
+      setImportStatus('Writing to database...');
+      
       const result = await api.bulkAddAttendance(validatedData);
-      setImportResult({ 
-        success: result.success, 
-        failed: result.failed, 
-        total: result.total 
-      });
+      
+      setImportProgress(100);
+      setImportStatus('Done!');
+      setImportResult({ success: result.success, failed: result.failed, total: result.total });
+      showToast(`Imported ${result.success} records successfully`, 'success');
     } catch (err) {
       console.error('Import failed:', err);
       setImportResult({ success: 0, failed: validatedData.length, total: validatedData.length });
+      showToast('Import failed', 'error');
     } finally {
       setImporting(false);
     }
@@ -206,7 +174,6 @@ export default function Upload() {
         <h1 className="text-h1 text-primary">Import Attendance</h1>
       </div>
 
-      {/* Step Indicator */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-16)', padding: '0 var(--space-4)' }}>
         {steps.map((s, i) => (
           <div key={s.id} style={{ display: 'flex', alignItems: 'center', flex: i === steps.length - 1 ? 'none' : 1 }}>
@@ -231,21 +198,10 @@ export default function Upload() {
         ))}
       </div>
 
-      <div className="card" style={{ minHeight: '400px', display: 'flex', flexDirection: 'column' }}>
-        {/* Step 1: Upload */}
+      <div className="card" style={{ minHeight: '440px', display: 'flex', flexDirection: 'column' }}>
         {step === 1 && (
           <div style={{ textAlign: 'center', padding: 'var(--space-12) 0' }}>
-            <div 
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileUpload(e); }}
-              style={{ 
-                border: `1px dashed ${isDragging ? 'var(--accent-glow)' : 'var(--border-default)'}`,
-                background: isDragging ? 'var(--accent-glow-soft)' : 'transparent',
-                borderRadius: 'var(--radius-2xl)', padding: 'var(--space-16)', cursor: 'pointer'
-              }}
-              onClick={() => document.getElementById('csv-input').click()}
-            >
+            <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileUpload(e); }} style={{ border: `1px dashed ${isDragging ? 'var(--accent-glow)' : 'var(--border-default)'}`, background: isDragging ? 'var(--accent-glow-soft)' : 'transparent', borderRadius: 'var(--radius-2xl)', padding: 'var(--space-16)', cursor: 'pointer', transition: 'all 0.2s' }} onClick={() => document.getElementById('csv-input').click()}>
               <input type="file" id="csv-input" accept=".csv" hidden onChange={handleFileUpload} />
               <div style={{ width: '64px', height: '64px', borderRadius: 'var(--radius-xl)', background: 'var(--bg-surface-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto var(--space-6)' }}>
                 <UploadIcon size={32} className="text-accent" />
@@ -256,10 +212,9 @@ export default function Upload() {
           </div>
         )}
 
-        {/* Step 2: AI Mapping */}
         {step === 2 && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--accent-glow-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-6)' }}>
+            <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--accent-glow-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-6)' }} className="pulse">
               <Sparkles size={32} className="text-accent" />
             </div>
             <h2 className="text-h2 text-primary" style={{ marginBottom: 'var(--space-2)' }}>File Uploaded Successfully</h2>
@@ -267,42 +222,42 @@ export default function Upload() {
               Found {csvData.length} rows and {csvHeaders.length} columns.
               <br />Our AI Agent will now analyze the headers to map messy attendance formats.
             </p>
-            
             {error && <p className="text-danger" style={{ marginBottom: '16px' }}>{error}</p>}
-
             <button className="btn-primary" onClick={askAiAgent} disabled={processingAi} style={{ minWidth: '200px', justifyContent: 'center' }}>
               {processingAi ? <><Loader size={18} className="spin" /> Analyzing...</> : 'Start AI Analysis'}
             </button>
           </div>
         )}
 
-        {/* Step 3: Review */}
         {step === 3 && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ marginBottom: 'var(--space-6)' }}>
-              <h3 className="text-h3 text-primary">Data Preview</h3>
-              <p className="text-caption text-secondary mt-1">
-                AI detected format: {mappingInfo?.is_pivoted ? 'Pivoted Dates' : 'Standard'} 
-                | Date Format: {mappingInfo?.date_format}
-              </p>
+            <div style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+              <div>
+                <h3 className="text-h3 text-primary">Data Preview</h3>
+                <p className="text-caption text-secondary mt-1">
+                  AI detected format: {mappingInfo?.is_pivoted ? 'Pivoted Dates' : 'Standard'} 
+                  | Date Format: {mappingInfo?.date_format}
+                </p>
+              </div>
+              <p className="text-body-sm text-secondary">{validatedData.length} records ready</p>
             </div>
             
-            <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg-void)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-default)' }}>
+            <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg-void)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-surface-raised)', zIndex: 1 }}>
                   <tr>
-                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '500' }}>USN</th>
-                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '500' }}>Date</th>
-                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '500' }}>Present</th>
+                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>USN</th>
+                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</th>
+                    <th style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Present</th>
                   </tr>
                 </thead>
                 <tbody>
                   {validatedData.slice(0, 50).map((row, i) => (
                     <tr key={i} style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{row.usn}</td>
-                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{row.date}</td>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>{row.usn}</td>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontSize: '13px' }}>{row.date}</td>
                       <td style={{ padding: '12px 16px' }}>
-                        {row.present ? <span className="text-success text-caption" style={{ padding: '4px 8px', background: 'var(--success-bg)', borderRadius: '4px' }}>Present</span> : <span className="text-danger text-caption" style={{ padding: '4px 8px', background: 'var(--danger-bg)', borderRadius: '4px' }}>Absent</span>}
+                        {row.present ? <span className="pill" style={{ background: 'var(--success-bg)', color: 'var(--success-fg)', border: '1px solid var(--success-border)' }}>Present</span> : <span className="pill" style={{ background: 'var(--danger-bg)', color: 'var(--danger-fg)', border: '1px solid var(--danger-border)' }}>Absent</span>}
                       </td>
                     </tr>
                   ))}
@@ -311,42 +266,57 @@ export default function Upload() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-4)', marginTop: 'var(--space-8)' }}>
               <button className="btn-secondary" onClick={() => setStep(1)}>Cancel</button>
-              <button className="btn-primary" onClick={startImport}>Confirm & Import {validatedData.length} Records</button>
+              <button className="btn-primary" onClick={startImport}>Confirm & Import</button>
             </div>
           </div>
         )}
 
-        {/* Step 4: Import */}
         {step === 4 && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             {importing ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ marginBottom: 'var(--space-8)' }}>
-                  <Loader size={40} className="text-accent" style={{ animation: 'spin 1s linear infinite' }} />
+              <div style={{ width: '100%', maxWidth: '400px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <p className="text-body font-medium text-primary">{importStatus}</p>
+                  <p className="text-body-sm text-secondary">{importProgress}%</p>
                 </div>
-                <h2 className="text-h2 text-primary" style={{ marginBottom: 'var(--space-2)' }}>Importing Data...</h2>
-                <p className="text-body text-secondary" style={{ marginBottom: 'var(--space-8)' }}>Please do not close this window.</p>
+                <div style={{ height: '8px', background: 'var(--bg-surface-inset)', borderRadius: '999px', overflow: 'hidden', marginBottom: '40px' }}>
+                  <div style={{ height: '100%', width: `${importProgress}%`, background: 'var(--accent-glow)', transition: 'width 0.4s ease' }} />
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
+                  {[
+                    { icon: FileText, label: 'Analyze' },
+                    { icon: Brain, label: 'Process' },
+                    { icon: Database, label: 'Store' }
+                  ].map((item, i) => {
+                    const isActive = (i === 0 && importProgress >= 10) || (i === 1 && importProgress >= 40) || (i === 2 && importProgress >= 70);
+                    const isDone = (i === 0 && importProgress > 40) || (i === 1 && importProgress > 70) || (i === 2 && importProgress >= 100);
+                    return (
+                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', zIndex: 2 }}>
+                        <div style={{ 
+                          width: '40px', height: '40px', borderRadius: '50%', background: isDone ? 'var(--success-bg)' : isActive ? 'var(--accent-glow-soft)' : 'var(--bg-surface-raised)',
+                          border: isDone ? '1px solid var(--success-border)' : isActive ? '1px solid var(--accent-glow)' : '1px solid var(--border-subtle)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDone ? 'var(--success-fg)' : isActive ? 'var(--accent-glow)' : 'var(--text-tertiary)',
+                          transition: 'all 0.3s'
+                        }}>
+                          {isDone ? <Check size={20} /> : <item.icon size={20} />}
+                        </div>
+                        <span className="text-caption" style={{ color: isActive ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{item.label}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ position: 'absolute', top: '20px', left: '40px', right: '40px', height: '1px', background: 'var(--border-subtle)', zIndex: 1 }} />
+                </div>
               </div>
             ) : importResult && (
-              <div>
-                <div style={{ 
-                  width: '80px', 
-                  height: '80px', 
-                  borderRadius: '50%', 
-                  background: 'var(--success-bg)', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  margin: '0 auto var(--space-8)',
-                  border: '1px solid var(--success-border)'
-                }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto var(--space-8)', border: '1px solid var(--success-border)' }}>
                   <CheckCircle2 size={40} className="text-success" />
                 </div>
                 <h2 className="text-h2 text-primary" style={{ marginBottom: 'var(--space-2)' }}>Import Complete</h2>
                 <p className="text-body text-secondary" style={{ marginBottom: 'var(--space-12)' }}>
                   Successfully imported {importResult.success} records. {importResult.failed} failed.
                 </p>
-                
                 <div style={{ display: 'flex', gap: 'var(--space-4)', justifyContent: 'center' }}>
                   <button className="btn-secondary" onClick={() => { setStep(1); setFile(null); }}>Import More</button>
                   <button className="btn-primary" onClick={() => window.location.href = '/dashboard'}>Go to Dashboard</button>
@@ -355,10 +325,12 @@ export default function Upload() {
             )}
           </div>
         )}
-
       </div>
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }
       `}</style>
     </div>
   );

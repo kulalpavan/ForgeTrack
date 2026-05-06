@@ -43,6 +43,7 @@ export const api = {
   getStats: () => api.fetch('/stats/overview'),
   getActivity: () => api.fetch('/activity'),
   getSessions: () => api.fetch('/sessions'),
+  deleteSession: (id) => api.fetch(`/sessions/${id}`, { method: 'DELETE' }),
   getStudents: () => api.fetch('/students'),
   getAttendance: (sid) => api.fetch(`/attendance/${sid}`),
   upsertAttendance: (data) => api.fetch('/attendance', { 

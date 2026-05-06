@@ -1,14 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation, NavLink } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import CommandPalette from './CommandPalette';
 import { api } from '../lib/api';
+import { LayoutDashboard, CheckSquare, BookOpen, UserCheck, Calendar, Settings, Command } from 'lucide-react';
 
 export default function AppShell() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     async function checkAuth() {
@@ -48,28 +57,71 @@ export default function AppShell() {
   const studentId = user?.studentId?._id || user?.studentId || null;
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-void)' }}>
-      <Sidebar 
-        role={role} 
-        displayName={displayName} 
-        collapsed={collapsed} 
-        onCollapse={() => setCollapsed(!collapsed)} 
-      />
+    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100vh', overflow: 'hidden', background: 'var(--bg-void)' }}>
+      {!isMobile && (
+        <Sidebar 
+          role={role} 
+          displayName={displayName} 
+          collapsed={collapsed} 
+          onCollapse={() => setCollapsed(!collapsed)} 
+        />
+      )}
       
-      {/* app-main applies the cosmic glow + dot-grid background per design system §6 */}
+      <CommandPalette role={role} />
+
       <main className="app-main" style={{ 
         flex: 1, 
-        padding: '32px 40px', 
+        padding: isMobile ? '24px 20px 100px 20px' : '32px 40px', 
         overflowY: 'auto',
-        transition: 'padding 0.25s ease',
-        minHeight: '100vh',
+        height: '100%'
       }}>
         <Outlet context={{ role, displayName, studentId, user }} />
       </main>
+
+      {isMobile && <BottomNav role={role} />}
 
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}</style>
     </div>
+  );
+}
+
+function BottomNav({ role }) {
+  const MENTOR_ITEMS = [
+    { to: '/dashboard',  icon: LayoutDashboard, label: 'Dash' },
+    { to: '/attendance', icon: CheckSquare,     label: 'Mark' },
+    { to: '/history',    icon: BookOpen,        label: 'Hist' }, // Using BookOpen for history space
+    { to: '/materials',  icon: BookOpen,        label: 'Mats' },
+    { to: '/settings',   icon: Settings,        label: 'Set' },
+  ];
+
+  const STUDENT_ITEMS = [
+    { to: '/me/attendance', icon: UserCheck,  label: 'Att' },
+    { to: '/me/upcoming',   icon: Calendar,   label: 'Up' },
+    { to: '/me/materials',  icon: BookOpen,   label: 'Mats' },
+    { to: '/me/settings',   icon: Settings,   label: 'Set' },
+  ];
+
+  const items = role === 'mentor' ? MENTOR_ITEMS : STUDENT_ITEMS;
+
+  return (
+    <nav style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0,
+      background: 'var(--bg-canvas)', borderTop: '1px solid var(--border-subtle)',
+      display: 'flex', justifyContent: 'space-around', padding: '12px 8px',
+      zIndex: 100, backdropFilter: 'blur(12px)'
+    }}>
+      {items.map(item => (
+        <NavLink key={item.to} to={item.to} style={({ isActive }) => ({
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+          textDecoration: 'none', color: isActive ? 'var(--accent-glow)' : 'var(--text-tertiary)',
+          transition: 'color 0.2s'
+        })}>
+          <item.icon size={20} />
+          <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{item.label}</span>
+        </NavLink>
+      ))}
+    </nav>
   );
 }

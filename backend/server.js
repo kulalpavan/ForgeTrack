@@ -176,6 +176,24 @@ app.post('/api/sessions', auth, async (req, res) => {
   }
 });
 
+// Delete Session (Mentor only)
+app.delete('/api/sessions/:id', auth, async (req, res) => {
+  if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
+  try {
+    const session = await Session.findByIdAndDelete(req.params.id);
+    if (!session) return res.status(404).json({ msg: 'Session not found' });
+    
+    // Delete all attendance records associated with this session
+    await Attendance.deleteMany({ sessionId: req.params.id });
+    
+    await logActivity(req.user.id, 'Session Deleted', `Deleted session: ${session.topic}`);
+    res.json({ msg: 'Session deleted' });
+  } catch (err) {
+    console.error('API Error:', err);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
 // Get Students (Mentor only)
 app.get('/api/students', auth, async (req, res) => {
   if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });

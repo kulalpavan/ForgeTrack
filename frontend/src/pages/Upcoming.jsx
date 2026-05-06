@@ -96,7 +96,8 @@ export default function Upcoming() {
             </div>
             <div style={{ textAlign: 'right' }}>
               <p className="text-h3 text-accent" style={{ fontWeight: '700' }}>{formatDate(nextSession.date)}</p>
-              <p className="text-body-sm text-secondary">{nextSession.duration}h • {(nextSession.sessionType || 'offline').toUpperCase()}</p>
+              <Countdown date={nextSession.date} />
+              <p className="text-body-sm text-secondary" style={{ marginTop: '4px' }}>{nextSession.duration}h • {(nextSession.sessionType || 'offline').toUpperCase()}</p>
             </div>
           </div>
 
@@ -213,6 +214,43 @@ export default function Upcoming() {
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
       `}</style>
+    </div>
+  );
+}
+
+function Countdown({ date }) {
+  const [timeLeft, setTimeLeft] = useState('');
+
+  useEffect(() => {
+    const target = new Date(date);
+    target.setHours(9, 0, 0, 0); // Assuming 9 AM start if time not specified
+
+    const interval = setInterval(() => {
+      const now = new Date();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        setTimeLeft('Starting soon...');
+        clearInterval(interval);
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+      if (days > 0) setTimeLeft(`${days}d ${hours}h left`);
+      else if (hours > 0) setTimeLeft(`${hours}h ${mins}m left`);
+      else setTimeLeft(`${mins}m left`);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [date]);
+
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: 'var(--accent-glow-soft)', borderRadius: '4px', border: '1px solid rgba(99,102,241,0.2)', marginTop: '4px' }}>
+      <Clock size={12} className="text-accent" />
+      <span className="text-micro font-medium text-accent uppercase tracking-wider">{timeLeft}</span>
     </div>
   );
 }

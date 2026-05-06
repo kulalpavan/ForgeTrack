@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { TrendingUp, CheckCircle, Clock, Filter, Download, Loader } from 'lucide-react';
+import { TrendingUp, CheckCircle, Clock, Filter, Download, Loader, Zap } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function StudentAttendance() {
@@ -34,8 +34,8 @@ export default function StudentAttendance() {
           
           // Map sessions for table
           const mappedSessions = att.map(a => ({
-            date: new Date(a.sessionId.date).toLocaleDateString(),
-            topic: a.sessionId.topic,
+            date: a.sessionId ? new Date(a.sessionId.date).toLocaleDateString() : '—',
+            topic: a.sessionId ? a.sessionId.topic : 'Unknown Session',
             status: a.present ? 'present' : 'absent',
             duration: '—'
           }));
@@ -110,8 +110,20 @@ export default function StudentAttendance() {
             <Clock size={20} className="text-warning" />
             <p className="text-label text-tertiary">CURRENT STREAK</p>
           </div>
-          <h2 className="text-display-sm text-primary">{stats.streak} <span className="text-h3 text-tertiary">Sessions</span></h2>
-          <p className="text-body-sm text-secondary" style={{ marginTop: 'var(--space-2)' }}>Keep it up! Consistency is key.</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h2 className="text-display-sm text-primary">{stats.streak} <span className="text-h3 text-tertiary">Sessions</span></h2>
+            {stats.streak > 0 && (
+              <div style={{ 
+                padding: '8px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', 
+                border: '1px solid rgba(239, 68, 68, 0.2)', animation: 'streak-pulse 2s infinite'
+              }}>
+                <Zap size={20} fill="#EF4444" color="#EF4444" />
+              </div>
+            )}
+          </div>
+          <p className="text-body-sm text-secondary" style={{ marginTop: 'var(--space-2)' }}>
+            {stats.streak >= 3 ? "You're on fire! 🔥" : "Keep it up! Consistency is key."}
+          </p>
         </div>
       </div>
 
@@ -130,7 +142,7 @@ export default function StudentAttendance() {
                 {heatmap.map((a, i) => (
                   <div 
                     key={i}
-                    title={`${new Date(a.sessionId.date).toLocaleDateString()}: ${a.present ? 'Present' : 'Absent'}`}
+                    title={a.sessionId ? `${new Date(a.sessionId.date).toLocaleDateString()}: ${a.present ? 'Present' : 'Absent'}` : 'Missing Session Info'}
                     style={{ 
                       aspectRatio: '1/1', 
                       borderRadius: 'var(--radius-md)',
@@ -216,6 +228,11 @@ export default function StudentAttendance() {
       </div>
       <style>{`
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes streak-pulse {
+          0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+          70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
       `}</style>
     </div>
   );

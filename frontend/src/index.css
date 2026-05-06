@@ -18,8 +18,8 @@
 
   /* Text */
   --text-primary:       #F5F5F7;
-  --text-secondary:     #8A8A94;
-  --text-tertiary:      #52525B;
+  --text-secondary:     #A1A1AA;
+  --text-tertiary:      #71717A;
   --text-inverse:       #0B0B11;
 
   /* Accent */
@@ -95,11 +95,21 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }
 
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 body {

@@ -51,9 +51,9 @@ export default function Sidebar({ role = 'mentor', displayName = '', collapsed =
   }
 
   return (
-    <aside style={{
+    <aside className="no-scrollbar" style={{
       width: collapsed ? '72px' : '260px',
-      minHeight: '100vh',
+      height: '100%',
       background: 'var(--bg-canvas)',
       borderRight: '1px solid var(--border-subtle)',
       display: 'flex',
@@ -156,8 +156,8 @@ export default function Sidebar({ role = 'mentor', displayName = '', collapsed =
         </div>
       )}
 
-      {/* Nav groups */}
-      <nav style={{ flex: 1, padding: collapsed ? '12px 8px' : '12px 12px', overflowY: 'auto' }}>
+      {/* Nav groups — Internal scroll only if needed, hidden scrollbar */}
+      <nav className="no-scrollbar" style={{ flex: 1, padding: collapsed ? '12px 8px' : '12px 12px', overflowY: 'auto' }}>
         {nav.map((group) => (
           <div key={group.label} style={{ marginBottom: '24px' }}>
             {!collapsed && (

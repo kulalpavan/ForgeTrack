@@ -57,6 +57,7 @@ export default function Dashboard() {
 /* ── Stat Strip ── */
 function StatStrip() {
   const [stats, setStats] = useState({ totalSessions: '—', avgAttendance: '—', activeStudents: '—', lastSession: '—' });
+  const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {
@@ -83,21 +84,31 @@ function StatStrip() {
     load();
   }, []);
 
+  const items = [
+    { icon: <Calendar size={16} />, label: 'Total Sessions', value: stats.totalSessions, to: '/history' },
+    { icon: <TrendingUp size={16} />, label: 'Overall Attendance', value: stats.avgAttendance, to: '/history' },
+    { icon: <Users size={16} />, label: 'Active Students', value: stats.activeStudents, to: '/history' },
+    { icon: <Clock size={16} />, label: 'Last Session', value: stats.lastSession, to: '/attendance' },
+  ];
+
   return (
     <div style={{
       display: 'flex', background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)',
       boxShadow: 'var(--shadow-card)', overflowX: 'auto', marginTop: '24px',
     }}>
-      {[
-        { icon: <Calendar size={16} />, label: 'Total Sessions', value: stats.totalSessions },
-        { icon: <TrendingUp size={16} />, label: 'Overall Attendance', value: stats.avgAttendance },
-        { icon: <Users size={16} />, label: 'Active Students', value: stats.activeStudents },
-        { icon: <Clock size={16} />, label: 'Last Session', value: stats.lastSession },
-      ].map((item, i, arr) => (
-        <div key={i} style={{
-          flex: '1', minWidth: '140px', padding: '20px 24px',
-          borderRight: i < arr.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-        }}>
+      {items.map((item, i) => (
+        <button 
+          key={i} 
+          onClick={() => navigate(item.to)}
+          style={{
+            flex: '1', minWidth: '140px', padding: '20px 24px',
+            borderRight: i < items.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+            background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer',
+            transition: 'background 0.2s'
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-surface-raised)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
             <span style={{ color: 'var(--text-tertiary)' }}>{item.icon}</span>
             <span className="text-caption text-tertiary">{item.label}</span>
@@ -105,8 +116,85 @@ function StatStrip() {
           <span className="text-body-lg text-primary" style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
             {item.value}
           </span>
-        </div>
+        </button>
       ))}
+    </div>
+  );
+}
+
+/* ── Attendance Trend Chart (SVG) ── */
+function AttendanceTrendChart() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const sessions = await api.getSessions();
+        const last5 = sessions.slice(0, 8).reverse();
+        
+        const trends = await Promise.all(last5.map(async (s) => {
+          const att = await api.getAttendance(s._id);
+          const present = att.filter(a => a.present).length;
+          const total = att.length;
+          return total > 0 ? (present / total) * 100 : 0;
+        }));
+        
+        setData(trends);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  if (loading || data.length < 2) return null;
+
+  const width = 300;
+  const height = 100;
+  const padding = 10;
+  const points = data.map((val, i) => {
+    const x = (i / (data.length - 1)) * (width - 2 * padding) + padding;
+    const y = height - (val / 100) * (height - 2 * padding) - padding;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <div style={{ marginTop: '24px' }}>
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="var(--success-fg)" stopOpacity="0.2" />
+            <stop offset="100%" stopColor="var(--success-fg)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polyline
+          fill="none"
+          stroke="var(--success-fg)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+          style={{ transition: 'all 0.5s ease' }}
+        />
+        <path
+          d={`M ${padding},${height} L ${points} L ${width - padding},${height} Z`}
+          fill="url(#gradient)"
+        />
+        {data.map((val, i) => {
+          const x = (i / (data.length - 1)) * (width - 2 * padding) + padding;
+          const y = height - (val / 100) * (height - 2 * padding) - padding;
+          return (
+            <circle key={i} cx={x} cy={y} r="3" fill="var(--bg-void)" stroke="var(--success-fg)" strokeWidth="1.5" />
+          );
+        })}
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+        <span className="text-micro text-tertiary">Previous Sessions</span>
+        <span className="text-micro text-tertiary">Today</span>
+      </div>
     </div>
   );
 }
@@ -289,10 +377,8 @@ function ProgramOverviewCard() {
             <span className="text-body text-secondary">Avg Attendance</span>
             <span className="text-body text-success">{data?.avgAttendance || '—'}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span className="text-body text-secondary">Active Mentors</span>
-            <span className="text-body text-primary">{data?.activeMentors || '—'}</span>
-          </div>
+          
+          <AttendanceTrendChart />
         </div>
       )}
     </div>

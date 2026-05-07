@@ -9,6 +9,9 @@ dns.setServers(['8.8.8.8', '8.8.4.4']);
 const User = require('./models/User');
 const Student = require('./models/Student');
 const Session = require('./models/Session');
+const Attendance = require('./models/Attendance');
+const Material = require('./models/Material');
+const ActivityLog = require('./models/ActivityLog');
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/forgetrack';
 
@@ -16,48 +19,70 @@ async function seed() {
   await mongoose.connect(MONGO_URI);
   console.log('Connected to seed...');
 
-  // Clear existing
-  await User.deleteMany({});
-  await Student.deleteMany({});
+  const mentorEmail = 'mentor_test@forgetrack.com';
+  const studentEmail = 'student_test@forgetrack.com';
+  const studentUsn = '4SF21CS001';
+  const password = 'password123';
+
+  // Remove all demo data while preserving login credentials
   await Session.deleteMany({});
+  await Attendance.deleteMany({});
+  await Material.deleteMany({});
+  await ActivityLog.deleteMany({});
 
-  // 1. Create Mentor
-  const mentorPwd = await bcrypt.hash('mentee123', 10);
-  const mentor = await User.create({
-    email: 'mentee@gmail.com',
-    password: mentorPwd,
-    role: 'mentor',
-    displayName: 'Chief Mentor'
+  await User.deleteMany({
+    $nor: [
+      { email: mentorEmail },
+      { email: studentEmail },
+      { usn: studentUsn }
+    ]
   });
-  console.log('Mentor created: mentee@gmail.com / mentee123');
 
-  // 2. Create Students
-  const students = await Student.insertMany([
-    { name: 'Nischay K', usn: '4SF24CI115', email: '4SF24CI115@forge.local', branchCode: 'CSE', batch: '2021-25' },
-    { name: 'Aditi Sharma', usn: '4SF24CI001', email: '4SF24CI001@forge.local', branchCode: 'ISE', batch: '2021-25' }
-  ]);
-  console.log('Students created');
+  await Student.deleteMany({ usn: { $ne: studentUsn } });
 
-  // 3. Create Student Users
-  const studentPwd = await bcrypt.hash('PASSWORD123', 10);
-  await User.create({
-    email: '4SF24CI115@forge.local',
-    password: studentPwd,
-    role: 'student',
-    studentId: students[0]._id,
-    displayName: 'Nischay K'
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const mentor = await User.findOne({ email: mentorEmail });
+  if (!mentor) {
+    await User.create({
+      email: mentorEmail,
+      password: hashedPassword,
+      role: 'mentor',
+      displayName: 'Test Mentor'
+    });
+    console.log(`Mentor created: ${mentorEmail} / ${password}`);
+  }
+
+  let studentProfile = await Student.findOne({ usn: studentUsn });
+  if (!studentProfile) {
+    studentProfile = await Student.create({
+      name: 'Test Student',
+      usn: studentUsn,
+      email: studentEmail,
+      branchCode: 'CSE',
+      batch: '2021-2025'
+    });
+    console.log(`Student profile created: ${studentUsn}`);
+  }
+
+  const studentUser = await User.findOne({
+    $or: [{ email: studentEmail }, { usn: studentUsn }]
   });
-  console.log('Student user created: 4SF24CI115 / PASSWORD123');
 
-  // 4. Create dummy sessions
-  await Session.insertMany([
-    { topic: 'Orientation & Introduction', date: new Date('2026-03-01'), monthNumber: 3 },
-    { topic: 'Web Development Basics', date: new Date('2026-03-15'), monthNumber: 3 },
-    { topic: 'React.js Deep Dive', date: new Date('2026-04-05'), monthNumber: 4 }
-  ]);
-  console.log('Sessions created');
+  if (!studentUser) {
+    await User.create({
+      email: studentEmail,
+      usn: studentUsn,
+      password: hashedPassword,
+      role: 'student',
+      studentId: studentProfile._id,
+      displayName: 'Test Student'
+    });
+    console.log(`Student user created: ${studentUsn} / ${password}`);
+  }
 
-  process.exit();
+  console.log('Cleaned seeded demo data, preserved only login credentials.');
+  process.exit(0);
 }
 
 seed();

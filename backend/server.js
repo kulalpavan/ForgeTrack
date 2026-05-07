@@ -242,22 +242,30 @@ app.post('/api/ai/map-csv', auth, async (req, res) => {
     }
 
     const prompt = `
-You are a data mapping AI assistant for a student attendance system. 
-You will receive CSV column headers and sample data. 
-Map each source column to one of these target fields: student_name, usn, date, attendance_status, IGNORE.
-Also, check if the data is "pivoted" (where dates are column headers instead of having a single 'date' column).
-If the dates are headers, map those specific headers to the string "date" and set is_pivoted to true.
-If the data is NOT pivoted (i.e. there is a single 'date' column), ensure the column denoting presence/absence is mapped to "attendance_status".
-Detect the date_format (e.g., DD/MM/YY, MM/DD/YYYY, YYYY-MM-DD) and attendance_convention (e.g., TRUE/FALSE, P/A, 1/0).
+You are a data mapping AI assistant for a student attendance system.
+You will receive CSV or spreadsheet column headers and sample rows.
+Map each source column to one of these target fields: student_name, usn, date, attendance_status. 
+For any other data columns that contain useful information (like Knowledge scores, Skill scores, Pre/Post assessments, etc.), map them to a cleaned, lowercased version of the header name (e.g., "knowledge_score", "skill_score").
+If the column is completely irrelevant, map it to "IGNORE".
 
-Return ONLY valid JSON in this exact format, with no markdown formatting or backticks:
+CRITICAL: Use the EXACT column names provided in the 'Headers' list as keys in the 'mapping' object.
+
+If the data is a pivoted attendance sheet (where date values appear as column headers), mark each date-like header (e.g. "Day 1 Attendance", "15/4/26") as "date" and set is_pivoted to true.
+If the sheet is standard, map the column denoting presence/absence to "attendance_status".
+If a column contains date-like header values but no explicit date column, still map those fields as "date".
+If there are corresponding score columns for each day (e.g. "Day 1 Knowledge"), map them using a pattern like "date_knowledge" or "date_skill" if possible, otherwise just use a cleaned name.
+Detect the date_format (e.g. DD/MM/YY, MM/DD/YYYY, YYYY-MM-DD) and attendance_convention (e.g. TRUE/FALSE, P/A, 1/0, Present/Absent).
+
+Return ONLY valid JSON in this exact format, with no markdown formatting, no surrounding backticks, and no extra commentary:
 {
   "mapping": {
-    "Original Column Name 1": "IGNORE",
-    "Original Name": "student_name",
-    "Original USN": "usn",
-    "15/4/26": "date",
-    "Status": "attendance_status"
+    "Exact Header Name 1": "IGNORE",
+    "Exact Header Name 2": "student_name",
+    "Exact Header Name 3": "usn",
+    "Day 1 Attendance": "date",
+    "Day 1 Knowledge(25)": "day_1_knowledge",
+    "Day 1 Skill(25)": "day_1_skill",
+    "Pre Assessment Score(20)": "pre_assessment"
   },
   "is_pivoted": true,
   "date_format": "DD/M/YY",
@@ -271,15 +279,63 @@ Sample Data (first 3 rows): ${JSON.stringify(sampleData)}
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
-    
-    // Clean up potential markdown from the response
+
     const jsonStr = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(jsonStr);
 
     res.json(parsed);
   } catch (err) {
     console.error('AI Mapping Error:', err);
-    res.status(500).json({ msg: 'Failed to process AI mapping' });
+    // Handle specific AI service errors
+    if (err.status === 503 || (err.message && err.message.includes('503'))) {
+      return res.status(503).json({ msg: 'AI service is currently overloaded. Please try again in a few minutes.' });
+    }
+    if (err.status === 404 || (err.message && err.message.includes('404'))) {
+      return res.status(404).json({ msg: 'AI model not found. Please contact support.' });
+    }
+    if (err.status === 429 || (err.message && err.message.includes('429'))) {
+      return res.status(429).json({ msg: 'Rate limit exceeded. Please wait before trying again.' });
+    }
+    
+    res.status(500).json({ msg: `AI Mapping failed: ${err.message || 'Unknown error'}` });
+  }
+});
+
+// Preview Import: detect existing sessions for target dates
+app.post('/api/attendance/preview-import', auth, async (req, res) => {
+  if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
+  try {
+    const { dates } = req.body;
+    if (!Array.isArray(dates) || dates.length === 0) {
+      return res.status(400).json({ msg: 'Missing dates for preview' });
+    }
+
+    const duplicates = [];
+    for (const rawDate of dates) {
+      const targetDate = parseDateSafe(rawDate);
+      if (!targetDate) continue;
+
+      const dayStart = new Date(targetDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(targetDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const session = await Session.findOne({ date: { $gte: dayStart, $lte: dayEnd } });
+      if (session) {
+        const existingCount = await Attendance.countDocuments({ sessionId: session._id });
+        duplicates.push({
+          date: targetDate.toISOString().split('T')[0],
+          sessionId: session._id,
+          topic: session.topic,
+          existingCount
+        });
+      }
+    }
+
+    res.json({ duplicates, totalDates: dates.length });
+  } catch (err) {
+    console.error('Preview Import Error:', err);
+    res.status(500).json({ msg: 'Server error' });
   }
 });
 
@@ -312,16 +368,24 @@ app.post('/api/attendance', auth, async (req, res) => {
 });
 
 // Helper: parse any date string into a JS Date safely
-// Handles ISO (YYYY-MM-DD), DD/M/YY, DD/MM/YY, DD/MM/YYYY
 function parseDateSafe(raw) {
-  if (!raw) return null;
-  const s = String(raw).trim();
+  if (!raw && raw !== 0) return null;
+  if (raw instanceof Date) return raw;
+  if (typeof raw === 'number') {
+    if (raw < 1000) return null;
+    const dt = new Date(Date.UTC(1899, 11, 30) + raw * 86400000);
+    return isNaN(dt) ? null : dt;
+  }
 
-  // ISO: 2026-04-15
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // Reject obvious non-dates like "Day 1"
+  if (/^day\s*\d+/i.test(s)) return null;
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s);
 
-  // DD/M/YY  DD/MM/YY  DD/MM/YYYY
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (m) {
     let [, d, mo, y] = m;
     if (y.length === 2) y = '20' + y;
@@ -330,68 +394,106 @@ function parseDateSafe(raw) {
     return isNaN(dt) ? null : dt;
   }
 
-  // fallback
   const dt = new Date(s);
-  return isNaN(dt) ? null : dt;
+  return isNaN(dt) || dt.getFullYear() > 2100 ? null : dt;
 }
 
 // Bulk Import Attendance from AI Agent
 app.post('/api/attendance/bulk-import', auth, async (req, res) => {
   if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
   try {
-    const { records } = req.body;
+    const { records, skipDates = [] } = req.body;
+    const skipSet = new Set((skipDates || []).map(d => {
+      const parsed = parseDateSafe(d);
+      return parsed ? parsed.toISOString().split('T')[0] : d;
+    }).filter(Boolean));
+
     let imported = 0;
     let failed = 0;
+    let skipped = 0;
+
+    // Cache sessions by topic label to avoid duplicate creation
+    const sessionCache = {};
 
     for (const row of records) {
       try {
-        // 1. Find student by USN (case-insensitive)
-        let student = await Student.findOne({ usn: row.usn.toUpperCase().trim() });
+        // 1. Find or create student by USN
+        const usnValue = String(row.usn || '').toUpperCase().trim();
+        if (!usnValue) { failed++; continue; }
+
+        // Update student name if available
+        let student = await Student.findOne({ usn: usnValue });
         if (!student) {
-          console.warn(`[import] Student not found, creating new: USN=${row.usn}`);
           student = await Student.create({
-            usn: row.usn.toUpperCase().trim(),
-            name: row.usn.toUpperCase().trim(),
+            usn: usnValue,
+            name: row.student_name || usnValue,
+            email: row.email || '',
+            branchCode: row.branch_code || 'GEN',
             isActive: true
           });
+        } else if (row.student_name && student.name === usnValue) {
+          // Update name if it was previously just USN
+          await Student.findByIdAndUpdate(student._id, { name: row.student_name, email: row.email || student.email });
         }
 
-        // 2. Parse date safely
-        const sessionDate = parseDateSafe(row.date);
-        if (!sessionDate) {
-          console.warn(`[import] Invalid date: "${row.date}" for USN=${row.usn}`);
-          failed++;
-          continue;
-        }
+        // 2. Resolve session — either by real date or by topic label
+        const sessionLabel = String(row.date || '').trim();
+        if (!sessionLabel) { failed++; continue; }
 
-        // 3. Find or create Session for that date (match by day only)
-        const dayStart = new Date(sessionDate); dayStart.setHours(0,0,0,0);
-        const dayEnd   = new Date(sessionDate); dayEnd.setHours(23,59,59,999);
-        let session = await Session.findOne({ date: { $gte: dayStart, $lte: dayEnd } });
+        if (skipSet.has(sessionLabel)) { skipped++; continue; }
+
+        let session = sessionCache[sessionLabel];
         if (!session) {
-          session = await Session.create({
-            date: sessionDate,
-            topic: 'Imported Session',
-            monthNumber: sessionDate.getMonth() + 1,
-            sessionType: 'offline'
-          });
+          const realDate = parseDateSafe(sessionLabel);
+          if (realDate) {
+            // Real date — find or create session by date
+            const dayStart = new Date(realDate); dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(realDate); dayEnd.setHours(23, 59, 59, 999);
+            session = await Session.findOne({ date: { $gte: dayStart, $lte: dayEnd } });
+            if (!session) {
+              session = await Session.create({
+                date: realDate,
+                topic: row.session_topic || `Session ${new Date(realDate).toLocaleDateString('en-IN')}`,
+                monthNumber: realDate.getMonth() + 1,
+                sessionType: 'offline'
+              });
+            }
+          } else {
+            // Label-based (e.g. "Day 1 Attendance") — find or create by topic
+            session = await Session.findOne({ topic: sessionLabel });
+            if (!session) {
+              // Extract day number for ordering
+              const dayMatch = sessionLabel.match(/(\d+)/);
+              const dayNum = dayMatch ? parseInt(dayMatch[1]) : 0;
+              // Use a base date offset so sessions are sortable
+              const baseDate = new Date('2026-01-01');
+              baseDate.setDate(baseDate.getDate() + dayNum - 1);
+              session = await Session.create({
+                date: baseDate,
+                topic: sessionLabel,
+                monthNumber: baseDate.getMonth() + 1,
+                sessionType: 'offline'
+              });
+            }
+          }
+          sessionCache[sessionLabel] = session;
         }
 
-        // 4. Upsert attendance record
+        // 3. Upsert attendance
         await Attendance.findOneAndUpdate(
           { studentId: student._id, sessionId: session._id },
-          { present: row.present, markedBy: 'csv_import' },
+          { present: Boolean(row.present), markedBy: 'csv_import', markedAt: Date.now() },
           { upsert: true, new: true }
         );
         imported++;
       } catch (e) {
-        console.error('[import] Row failed:', row, e.message);
+        console.error('[import] Row failed:', e.message, row);
         failed++;
       }
     }
 
     await logActivity(req.user.id, 'CSV Attendance Import', `Imported ${imported} records`);
-    res.json({ success: imported, failed, total: records.length });
+    res.json({ success: imported, failed, skipped, total: records.length });
   } catch (err) {
     console.error('API Error:', err);
     res.status(500).json({ msg: 'Server error' });

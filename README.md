@@ -21,7 +21,7 @@ npm run dev
 
 ## Phase 1: Database Setup
 
-This project uses a MongoDB database. To initialize the database with seed data:
+This project uses a MongoDB database. To remove seeded demo rows while preserving only the test login credentials:
 
 1. Ensure your MongoDB connection string is set in `backend/.env`.
 2. Run the seed script:
@@ -60,7 +60,9 @@ You need to configure environment variables for both the backend and frontend.
 | `MONGO_URI` | Your MongoDB connection string |
 | `JWT_SECRET` | Secret key for signing JWT tokens |
 | `PORT` | Backend server port (default: 5000) |
-| `GEMINI_API_KEY` | Google Gemini API key (needed for Phase 4 CSV agent) |
+| `GEMINI_API_KEY` | Google Gemini API key (get one at [Google AI Studio](https://aistudio.google.com/apikey)) |
+
+**Important:** Replace `GEMINI_API_KEY` with your actual API key from Google AI Studio. Without this, the CSV Import feature will fail.
 
 **Frontend (`frontend/.env.local`):**
 | Variable | Description |
@@ -85,6 +87,6 @@ You need to configure environment variables for both the backend and frontend.
 - **Styling**: Tailwind CSS v3 + CSS custom properties
 - **Database**: Supabase (PostgreSQL + Auth + RLS)
 - **CSV Parsing**: PapaParse (CSV) + SheetJS (XLSX)
-- **AI Agent**: Google Gemini 2.0 Flash
+- **AI Agent**: Google Gemini 2.5 Flash
 - **Icons**: Lucide React
 - **Fonts**: Satoshi (Fontshare) + Inter + JetBrains Mono (Google Fonts)

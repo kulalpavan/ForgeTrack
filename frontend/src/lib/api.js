@@ -64,9 +64,13 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ headers, sampleData })
   }),
-  bulkAddAttendance: (records) => api.fetch('/attendance/bulk-import', {
+  previewImport: (payload) => api.fetch('/attendance/preview-import', {
     method: 'POST',
-    body: JSON.stringify({ records })
+    body: JSON.stringify(payload)
+  }),
+  bulkAddAttendance: (records, options = {}) => api.fetch('/attendance/bulk-import', {
+    method: 'POST',
+    body: JSON.stringify({ records, ...options })
   }),
   bulkAddStudents: (data) => api.fetch('/students/bulk', {
     method: 'POST',

@@ -22,10 +22,13 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// In production, serve the frontend dist folder
+// Serve frontend static files if the dist folder exists
 const path = require('path');
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+const fs = require('fs');
+const distPath = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  console.log('[STATIC] Serving frontend from:', distPath);
 }
 
 
@@ -722,10 +725,12 @@ app.delete('/api/materials/:id', auth, async (req, res) => {
   }
 });
 
-// Catch-all route to serve frontend index.html for any non-API routes in production
-if (process.env.NODE_ENV === 'production') {
+// Catch-all: serve index.html for non-API routes (SPA routing support)
+if (fs.existsSync(distPath)) {
   app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, '../frontend', 'dist', 'index.html'));
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(distPath, 'index.html'));
+    }
   });
 }
 

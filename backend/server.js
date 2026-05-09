@@ -53,45 +53,51 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/forgetrack'
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
-  const { identifier, password } = req.body;
-  const loginId = String(identifier || '').toUpperCase().trim();
-
   try {
-    // 1. Search by User record first (Mentors and registered Students)
-    let user = await User.findOne({
-      $or: [
-        { email: identifier },
-        { usn: loginId }
-      ]
+    const { identifier, password } = req.body;
+    const cleanId = String(identifier || '').toUpperCase().trim();
+    const cleanPw = String(password   || '').toUpperCase().trim();
+
+    console.log(`[AUTH] Login Attempt: "${cleanId}"`);
+
+    // 1. Check if they are a Mentor/Admin (User Collection)
+    let user = await User.findOne({ 
+      $or: [{ email: identifier }, { usn: cleanId }] 
     }).populate('studentId');
 
     if (user) {
       const isMatch = await bcrypt.compare(password, user.password);
-      if (isMatch) {
-        return sendToken(user, res);
+      if (isMatch) return sendToken(user, res);
+    }
+
+    // 2. UNIVERSAL STUDENT FALLBACK
+    // If no user record exists, or password didn't match User record,
+    // check if this is a valid Student USN.
+    // FUZZY MATCH: Remove all non-alphanumeric chars just in case
+    const fuzzyId = cleanId.replace(/[^A-Z0-9]/g, '');
+    const students = await Student.find(); // Fetch and find to be 100% sure
+    const student = students.find(s => s.usn.toUpperCase().replace(/[^A-Z0-9]/g, '') === fuzzyId);
+    
+    if (student) {
+      // If password matches USN (case-insensitive fuzzy)
+      if (cleanPw.replace(/[^A-Z0-9]/g, '') === student.usn.toUpperCase().replace(/[^A-Z0-9]/g, '')) {
+        console.log(`[AUTH] Universal Student Login Success: ${student.usn}`);
+        return sendToken({
+          id: `std_${student._id}`,
+          _id: student._id,
+          role: 'student',
+          studentId: student._id,
+          usn: student.usn,
+          displayName: student.name
+        }, res);
       }
     }
 
-    // 2. Fallback: Search Student record (Auto-auth via USN)
-    // Every student can login with USN as both username and password
-    const student = await Student.findOne({ usn: loginId });
-    if (student && password.toUpperCase().trim() === loginId) {
-      // Mock a user object for the token
-      const mockUser = {
-        id: `temp_${student._id}`, // Pre-fixed to distinguish from real User records
-        _id: student._id,
-        role: 'student',
-        studentId: student._id,
-        usn: student.usn,
-        displayName: student.name
-      };
-      return sendToken(mockUser, res);
-    }
-
-    return res.status(400).json({ msg: 'Invalid Credentials' });
+    console.warn(`[AUTH] Login Failed for: ${cleanId} (Fuzzy: ${fuzzyId})`);
+    res.status(400).json({ msg: 'Invalid Credentials' });
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ msg: 'Server Error' });
+    console.error('[AUTH] Critical Error:', err);
+    res.status(500).json({ msg: 'Server error' });
   }
 });
 
@@ -122,10 +128,29 @@ function sendToken(user, res) {
 const auth = require('./middleware/auth');
 app.get('/api/auth/me', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password').populate('studentId');
+    const userId = req.user.id;
+
+    // Student tokens use the 'std_' prefix — fetch from Student collection
+    if (String(userId).startsWith('std_')) {
+      const studentId = req.user.studentId;
+      const student = await Student.findById(studentId);
+      if (!student) return res.status(404).json({ msg: 'Student not found' });
+      return res.json({
+        _id: student._id,
+        displayName: student.name,
+        usn: student.usn,
+        email: student.email,
+        role: 'student',
+        studentId: student._id,
+      });
+    }
+
+    // Mentor/Admin tokens — fetch from User collection
+    const user = await User.findById(userId).select('-password').populate('studentId');
+    if (!user) return res.status(404).json({ msg: 'User not found' });
     res.json(user);
   } catch (err) {
-    console.error('API Error:', err);
+    console.error('API Error /me:', err);
     res.status(500).json({ msg: 'Server error' });
   }
 });

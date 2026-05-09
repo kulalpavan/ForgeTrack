@@ -8,9 +8,18 @@
         "includeFiles": ["backend/**/*", "frontend/dist/**/*"],
         "bundle": false
       }
+    },
+    {
+      "src": "frontend/dist/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/api/index.js" }
+    { "src": "/api/(.*)", "dest": "/api/index.js" },
+    { "src": "/assets/(.*)", "dest": "/frontend/dist/assets/$1" },
+    { "src": "/(.*\\.js)", "dest": "/frontend/dist/$1" },
+    { "src": "/(.*\\.css)", "dest": "/frontend/dist/$1" },
+    { "src": "/(.*\\.svg)", "dest": "/frontend/dist/$1" },
+    { "src": "/(.*)", "dest": "/frontend/dist/index.html" }
   ]
 }

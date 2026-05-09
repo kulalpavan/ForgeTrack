@@ -1,10 +1,13 @@
 // Vercel Serverless Entry Point
-// Fix module resolution: ensure backend files can be found
-// regardless of where Vercel places the function
+// When @vercel/node bundles this with ncc, __dirname changes.
+// We pass the correct paths via environment variables set below
+// BEFORE requiring server.js, so it can use them.
+
 const path = require('path');
 
-// Set the correct working directory so all relative requires in server.js work
-process.chdir(path.join(__dirname, '../backend'));
+// Tell server.js where the frontend dist is (relative to THIS file before bundling)
+// This path is resolved at BUILD time by ncc, so it must point to the actual location
+process.env.FRONTEND_DIST_PATH = path.resolve(__dirname, '../frontend/dist');
+process.env.BACKEND_PATH = path.resolve(__dirname, '../backend');
 
-// Now require the server — all relative paths in server.js resolve from backend/
 module.exports = require('../backend/server.js');

@@ -22,10 +22,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Serve frontend static files if the dist folder exists
+// Serve frontend static files
+// Use FRONTEND_DIST_PATH if set (Vercel bundled), otherwise derive from __dirname
 const path = require('path');
 const fs = require('fs');
-const distPath = path.join(__dirname, '../frontend/dist');
+const distPath = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '../frontend/dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   console.log('[STATIC] Serving frontend from:', distPath);

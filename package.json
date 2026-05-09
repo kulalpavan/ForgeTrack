@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "ForgeTrack - AI/ML Bootcamp Attendance Management System",
   "scripts": {
-    "vercel-build": "cd frontend && npm install && npm run build"
+    "vercel-build": "npm install --prefix frontend && npm run build --prefix frontend",
+    "build": "npm install --prefix frontend && npm run build --prefix frontend"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

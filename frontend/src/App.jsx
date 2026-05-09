@@ -11,7 +11,6 @@ import StudentAttendance from './pages/StudentAttendance';
 import Upcoming   from './pages/Upcoming';
 import AppShell   from './components/AppShell';
 import RoleGuard  from './components/RoleGuard';
-import DevTokens  from './pages/DevTokens';
 
 
 export default function App() {
@@ -22,8 +21,6 @@ export default function App() {
         <Route path="/login"    element={<Login />} />
         <Route path="/403"      element={<Forbidden />} />
 
-        {/* ── Dev (Phase 0 gate — remove in Phase 6) ── */}
-        <Route path="/dev-tokens" element={<DevTokens />} />
 
         {/* ── Authenticated — Shell wrapper ─────────── */}
         <Route element={<AppShell />}>

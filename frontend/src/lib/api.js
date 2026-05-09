@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
@@ -34,15 +34,24 @@ export const api = {
       ...options,
       headers: { ...getHeaders(), ...options.headers }
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.msg || 'API Request failed');
-    return data;
+    
+    const contentType = res.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'API Request failed');
+      return data;
+    } else {
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}`);
+      return text;
+    }
   },
 
   // Resources
   getStats: () => api.fetch('/stats/overview'),
   getActivity: () => api.fetch('/activity'),
   getSessions: () => api.fetch('/sessions'),
+  updateSession: (id, data) => api.fetch(`/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSession: (id) => api.fetch(`/sessions/${id}`, { method: 'DELETE' }),
   getStudents: () => api.fetch('/students'),
   getAttendance: (sid) => api.fetch(`/attendance/${sid}`),
@@ -62,7 +71,7 @@ export const api = {
   // AI Agent & CSV Import
   mapCsv: (headers, sampleData) => api.fetch('/ai/map-csv', {
     method: 'POST',
-    body: JSON.stringify({ headers, sampleData })
+    body: JSON.stringify({ headers, sampleData: sampleData.slice(0, 15) })
   }),
   previewImport: (payload) => api.fetch('/attendance/preview-import', {
     method: 'POST',
@@ -75,5 +84,10 @@ export const api = {
   bulkAddStudents: (data) => api.fetch('/students/bulk', {
     method: 'POST',
     body: JSON.stringify(data)
+  }),
+  // Batch upsert attendance for mark-attendance page (single API call)
+  batchUpsertAttendance: (sessionId, records) => api.fetch('/attendance/batch', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId, records })
   })
 };

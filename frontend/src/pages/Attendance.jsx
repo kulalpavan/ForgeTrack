@@ -1,12 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Calendar, CheckSquare, Users, Save, AlertCircle, Loader, Search as SearchIcon, ChevronLeft, ChevronRight, Lock, Trash2 } from 'lucide-react';
+import { Calendar, CheckSquare, Users, Save, AlertCircle, Loader, Search as SearchIcon, ChevronLeft, ChevronRight, Lock, Trash2, Edit3, Check, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatDate, formatMonth } from '../lib/utils';
 import { useToast } from '../lib/ToastContext';
 
 function getTodayString() {
   const d = new Date();
-  return d.toISOString().split('T')[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 export default function Attendance() {
@@ -35,6 +39,9 @@ export default function Attendance() {
   // Attendance state: Map of studentId -> boolean
   const [attendanceState, setAttendanceState] = useState({});
   const [hasExistingAttendance, setHasExistingAttendance] = useState(false);
+
+  const [isEditingTopic, setIsEditingTopic] = useState(false);
+  const [editTopicValue, setEditTopicValue] = useState('');
 
   // Derived calendar properties
   const isPast = date < todayStr;
@@ -67,6 +74,16 @@ export default function Attendance() {
 
       const ses = sessions.find(s => s.date.split('T')[0] === targetDate);
       setSession(ses);
+      if (ses) {
+        setTopic(ses.topic);
+        setEditTopicValue(ses.topic);
+        setSessionType(ses.session_type || ses.sessionType || 'offline');
+        setDuration(String(ses.duration_hours || ses.duration || '2.0'));
+      } else {
+        setTopic('');
+        setEditTopicValue('');
+      }
+      setIsEditingTopic(false);
 
       const newState = {};
       stds?.forEach(s => newState[s._id] = true); // Default present if today
@@ -134,13 +151,13 @@ export default function Attendance() {
         setSession(newSes);
       }
 
-      for (const studentId of Object.keys(attendanceState)) {
-        await api.upsertAttendance({
-          studentId,
-          sessionId: currentSessionId,
-          present: attendanceState[studentId]
-        });
-      }
+      // Build batch payload — single API call instead of N sequential calls
+      const records = Object.entries(attendanceState).map(([studentId, present]) => ({
+        studentId,
+        present
+      }));
+
+      await api.batchUpsertAttendance(currentSessionId, records);
 
       showToast('Attendance saved successfully!', 'success');
       setHasExistingAttendance(true);
@@ -150,6 +167,30 @@ export default function Attendance() {
     } catch (err) {
       console.error(err);
       showToast('Error saving attendance: ' + err.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateSessionTopic() {
+    if (!editTopicValue.trim() || editTopicValue === session.topic) {
+      setIsEditingTopic(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.updateSession(session._id, { topic: editTopicValue });
+      setSession(updated);
+      setTopic(updated.topic);
+      setIsEditingTopic(false);
+      showToast('Session name updated', 'success');
+      
+      // Update local allSessions list
+      const sessions = await api.getSessions();
+      setAllSessions(sessions || []);
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to update session name: ' + (err.msg || err.message || 'Unknown error'), 'error');
     } finally {
       setSaving(false);
     }
@@ -221,7 +262,7 @@ export default function Attendance() {
       <div className="card" style={{ marginBottom: '24px', padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <span className="text-body-lg font-medium text-primary">
-            {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            {formatMonth(currentMonth)}
           </span>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button className="btn-secondary" style={{ padding: '6px', height: 'auto' }} onClick={prevMonth}>
@@ -298,7 +339,7 @@ export default function Attendance() {
         <div style={{ flex: '1', minWidth: '200px' }}>
           <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>SESSION DATE</p>
           <div className="input" style={{ background: 'var(--bg-surface-inset)', display: 'flex', alignItems: 'center', color: 'var(--text-primary)' }}>
-            {new Date(date).toLocaleDateString('en-GB').replace(/\//g, '-')} <Calendar size={14} className="text-tertiary" style={{ marginLeft: 'auto' }} />
+            {formatDate(date)} <Calendar size={14} className="text-tertiary" style={{ marginLeft: 'auto' }} />
           </div>
         </div>
 
@@ -309,7 +350,31 @@ export default function Attendance() {
         ) : session ? (
           <div style={{ flex: '2', minWidth: '300px' }}>
              <p className="text-micro text-tertiary" style={{ marginBottom: '8px' }}>SESSION TOPIC</p>
-             <input className="input" value={session.topic} disabled style={{ background: 'var(--bg-surface-inset)' }} />
+             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isEditingTopic ? (
+                  <>
+                    <input 
+                      className="input" 
+                      value={editTopicValue} 
+                      onChange={e => setEditTopicValue(e.target.value)}
+                      autoFocus
+                    />
+                    <button className="btn-primary" style={{ padding: '8px' }} onClick={handleUpdateSessionTopic}>
+                      <Check size={18} />
+                    </button>
+                    <button className="btn-secondary" style={{ padding: '8px' }} onClick={() => { setIsEditingTopic(false); setEditTopicValue(session.topic); }}>
+                      <X size={18} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input className="input" value={session.topic} disabled style={{ background: 'var(--bg-surface-inset)', flex: 1 }} />
+                    <button className="btn-secondary" style={{ padding: '8px' }} onClick={() => setIsEditingTopic(true)}>
+                      <Edit3 size={18} className="text-tertiary" />
+                    </button>
+                  </>
+                )}
+             </div>
              <p className="text-caption text-tertiary" style={{ marginTop: '8px' }}>
                {session.duration_hours || session.duration || '2.0'} hours • {(session.session_type || session.sessionType || 'offline').toUpperCase()}
              </p>
@@ -388,13 +453,13 @@ export default function Attendance() {
                 <div style={{ 
                   padding: '6px 12px', 
                   borderRadius: 'var(--radius-md)', 
-                  border: `1px solid ${attendanceState[s._id] ? (isPast ? 'var(--border-subtle)' : 'var(--success-border)') : 'var(--border-subtle)'}`, 
-                  background: attendanceState[s._id] ? (isPast ? 'transparent' : 'var(--success-bg)') : 'transparent', 
-                  color: attendanceState[s._id] ? (isPast ? 'var(--text-secondary)' : 'var(--success-fg)') : 'var(--text-tertiary)', 
-                  fontSize: '12px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em', width: '90px', textAlign: 'center', transition: 'all 0.2s',
+                  border: `1px solid ${(isPast && !session) ? 'var(--border-subtle)' : attendanceState[s._id] ? (isPast ? 'var(--border-subtle)' : 'var(--success-border)') : 'var(--border-subtle)'}`, 
+                  background: (isPast && !session) ? 'transparent' : attendanceState[s._id] ? (isPast ? 'transparent' : 'var(--success-bg)') : 'transparent', 
+                  color: (isPast && !session) ? 'var(--text-tertiary)' : attendanceState[s._id] ? (isPast ? 'var(--text-secondary)' : 'var(--success-fg)') : 'var(--text-tertiary)', 
+                  fontSize: '12px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.05em', width: '100px', textAlign: 'center', transition: 'all 0.2s',
                   opacity: isPast ? 0.8 : 1
                 }}>
-                  {attendanceState[s._id] ? 'Present' : 'Absent'}
+                  {(isPast && !session) ? 'No Class' : (attendanceState[s._id] ? 'Present' : 'Absent')}
                 </div>
               </div>
             ))}

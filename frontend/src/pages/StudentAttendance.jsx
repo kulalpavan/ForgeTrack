@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { TrendingUp, CheckCircle, Clock, Filter, Download, Loader, Zap } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatDate } from '../lib/utils';
 
 export default function StudentAttendance() {
   const { displayName, studentId } = useOutletContext();
@@ -142,7 +143,7 @@ export default function StudentAttendance() {
                 {heatmap.map((a, i) => (
                   <div 
                     key={i}
-                    title={a.sessionId ? `${new Date(a.sessionId.date).toLocaleDateString()}: ${a.present ? 'Present' : 'Absent'}` : 'Missing Session Info'}
+                    title={a.sessionId ? `${formatDate(a.sessionId.date)}: ${a.present ? 'Present' : 'Absent'}` : 'Missing Session Info'}
                     style={{ 
                       aspectRatio: '1/1', 
                       borderRadius: 'var(--radius-md)',
@@ -171,7 +172,7 @@ export default function StudentAttendance() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--bg-surface-inset)', border: '1px solid var(--border-subtle)' }} />
-                  <span className="text-micro text-tertiary">Empty</span>
+                  <span className="text-micro text-tertiary">No Class</span>
                 </div>
              </div>
           </div>
@@ -211,7 +212,7 @@ export default function StudentAttendance() {
                   </tr>
                 ) : sessions.map((session, i) => (
                   <tr key={i}>
-                    <td className="text-mono text-body-sm">{session.date}</td>
+                    <td className="text-mono text-body-sm">{formatDate(session.date)}</td>
                     <td className="text-primary" style={{ fontWeight: '500' }}>{session.topic}</td>
                     <td className="text-secondary text-body-sm">{session.duration}</td>
                     <td style={{ textAlign: 'right' }}>

@@ -3,55 +3,13 @@
 @tailwind utilities;
 
 /* ─── CSS Custom Properties (Design System Tokens) ─────────────────────────── */
+/* ─── CSS Custom Properties (Design System Tokens) ─────────────────────────── */
 :root {
-  /* Canvas & Surfaces */
-  --bg-void:            #07070B;
-  --bg-canvas:          #0B0B11;
-  --bg-surface:         #111118;
-  --bg-surface-raised:  #16161F;
-  --bg-surface-inset:   #0E0E14;
-
-  /* Borders */
-  --border-subtle:      rgba(255, 255, 255, 0.06);
-  --border-default:     rgba(255, 255, 255, 0.10);
-  --border-strong:      rgba(255, 255, 255, 0.16);
-
-  /* Text */
-  --text-primary:       #F5F5F7;
-  --text-secondary:     #A1A1AA;
-  --text-tertiary:      #71717A;
-  --text-inverse:       #0B0B11;
-
-  /* Accent */
-  --accent-glow:        #6366F1;
-  --accent-glow-soft:   rgba(99, 102, 241, 0.15);
-
-  /* Semantic — Success */
-  --success-fg:         #10B981;
-  --success-bg:         rgba(16, 185, 129, 0.12);
-  --success-border:     rgba(16, 185, 129, 0.25);
-
-  /* Semantic — Danger */
-  --danger-fg:          #F43F5E;
-  --danger-bg:          rgba(244, 63, 94, 0.12);
-  --danger-border:      rgba(244, 63, 94, 0.25);
-
-  /* Semantic — Warning */
-  --warning-fg:         #F59E0B;
-  --warning-bg:         rgba(245, 158, 11, 0.12);
-  --warning-border:     rgba(245, 158, 11, 0.25);
-
-  /* Semantic — Info */
-  --info-fg:            #3B82F6;
-  --info-bg:            rgba(59, 130, 246, 0.12);
-  --info-border:        rgba(59, 130, 246, 0.25);
-
-  /* Typography */
+  /* Common Tokens (Non-color) */
   --font-display: 'Satoshi', 'Inter', system-ui, sans-serif;
   --font-body:    'Inter', system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', 'SF Mono', monospace;
 
-  /* Spacing */
   --space-1:   4px;
   --space-2:   8px;
   --space-3:   12px;
@@ -65,7 +23,6 @@
   --space-20:  80px;
   --space-24:  96px;
 
-  /* Border Radius */
   --radius-sm:    6px;
   --radius-md:    10px;
   --radius-lg:    14px;
@@ -73,7 +30,81 @@
   --radius-2xl:   24px;
   --radius-full:  9999px;
 
-  /* Shadows & Glows */
+  /* Accent - Shared but slightly tuned per theme */
+  --accent-glow:        #6366F1;
+  --accent-glow-soft:   rgba(99, 102, 241, 0.15);
+
+  /* Transitions */
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.15s ease;
+}
+
+/* Light Theme (Default) */
+:root, .light-theme {
+  --bg-void:            #F4F4F7;
+  --bg-canvas:          #FBFBFE;
+  --bg-surface:         #FFFFFF;
+  --bg-surface-raised:  #F1F1F6;
+  --bg-surface-inset:   #F8F8FB;
+
+  --border-subtle:      rgba(0, 0, 0, 0.05);
+  --border-default:     rgba(0, 0, 0, 0.08);
+  --border-strong:      rgba(0, 0, 0, 0.12);
+
+  --text-primary:       #121217;
+  --text-secondary:     #52525B;
+  --text-tertiary:      #82828C;
+  --text-inverse:       #FFFFFF;
+
+  --shadow-card:   0 2px 4px rgba(0, 0, 0, 0.02), 0 0 0 1px var(--border-subtle);
+  --shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border-default);
+  --shadow-focus:  0 0 0 3px rgba(99, 102, 241, 0.2);
+
+  --glow-cosmic: radial-gradient(
+    ellipse 600px 300px at 50% -100px,
+    rgba(99, 102, 241, 0.08),
+    rgba(99, 102, 241, 0) 70%
+  );
+  --card-gradient: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.005) 0%,
+    rgba(0, 0, 0, 0) 50%
+  );
+
+  --success-fg:         #059669;
+  --success-bg:         #ECFDF5;
+  --success-border:     #A7F3D0;
+  
+  --danger-fg:          #E11D48;
+  --danger-bg:          #FFF1F2;
+  --danger-border:      #FECDD3;
+
+  --warning-fg:         #D97706;
+  --warning-bg:         #FFFBEB;
+  --warning-border:     #FEF3C7;
+
+  --info-fg:            #2563EB;
+  --info-bg:            #EFF6FF;
+  --info-border:        #DBEAFE;
+}
+
+/* Dark Theme */
+.dark-theme {
+  --bg-void:            #07070B;
+  --bg-canvas:          #0B0B11;
+  --bg-surface:         #111118;
+  --bg-surface-raised:  #16161F;
+  --bg-surface-inset:   #0E0E14;
+
+  --border-subtle:      rgba(255, 255, 255, 0.06);
+  --border-default:     rgba(255, 255, 255, 0.10);
+  --border-strong:      rgba(255, 255, 255, 0.16);
+
+  --text-primary:       #F5F5F7;
+  --text-secondary:     #A1A1AA;
+  --text-tertiary:      #71717A;
+  --text-inverse:       #0B0B11;
+
   --shadow-card:   0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--border-subtle);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-default);
   --shadow-focus:  0 0 0 3px rgba(99, 102, 241, 0.25);
@@ -88,14 +119,31 @@
     rgba(255, 255, 255, 0.02) 0%,
     rgba(255, 255, 255, 0) 50%
   );
+
+  --success-fg:         #10B981;
+  --success-bg:         rgba(16, 185, 129, 0.12);
+  --success-border:     rgba(16, 185, 129, 0.25);
+
+  --danger-fg:          #F43F5E;
+  --danger-bg:          rgba(244, 63, 94, 0.12);
+  --danger-border:      rgba(244, 63, 94, 0.25);
+
+  --warning-fg:         #F59E0B;
+  --warning-bg:         rgba(245, 158, 11, 0.12);
+  --warning-border:     rgba(245, 158, 11, 0.25);
+
+  --info-fg:            #3B82F6;
+  --info-bg:            rgba(59, 130, 246, 0.12);
+  --info-border:        rgba(59, 130, 246, 0.25);
 }
+
 
 /* ─── Base Reset & Body ─────────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  transition: background-color var(--transition-slow), color var(--transition-slow), border-color var(--transition-slow), box-shadow var(--transition-slow);
 }
 
 html {
@@ -367,3 +415,20 @@ body {
   outline: none;
   box-shadow: var(--shadow-focus);
 }
+
+/* ─── Density: Compact ──────────────────────────────────────────────────────── */
+.density-compact {
+  --space-4: 12px;
+  --space-6: 16px;
+  --space-8: 20px;
+  --space-10: 24px;
+}
+.density-compact .card { padding: var(--space-6); }
+.density-compact .card-hero { padding: var(--space-8); }
+.density-compact .table tbody td { padding: 12px 16px; font-size: 13px; }
+.density-compact .table thead th { padding: 12px 16px; font-size: 11px; }
+.density-compact .text-h1 { font-size: 1.5rem; }
+.density-compact .text-h2 { font-size: 1.25rem; }
+.density-compact .text-display-sm { font-size: 1.75rem; }
+.density-compact .btn-primary, .density-compact .btn-secondary { padding: 8px 16px; font-size: 13px; }
+.density-compact .input { height: 38px; padding: 8px 12px; font-size: 13px; }

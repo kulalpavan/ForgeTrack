@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { LayoutDashboard, CheckCircle, XCircle, Clock, BookOpen, TrendingUp, Calendar, Loader } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatDate } from '../lib/utils';
 
 export default function StudentDashboard() {
   const { displayName } = useOutletContext();
@@ -111,7 +112,7 @@ export default function StudentDashboard() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Calendar size={14} className="text-tertiary" />
                       <span className="text-body-sm text-secondary">
-                        {new Date(rs.sessionId.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                        {formatDate(rs.sessionId.date)}
                       </span>
                     </div>
                   </td>

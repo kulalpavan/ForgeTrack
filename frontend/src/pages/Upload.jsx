@@ -56,8 +56,14 @@ const parseDateString = (raw) => {
 };
 
 const normalizePresent = (val) => {
-  const value = String(val || '').trim().toUpperCase();
-  return ['TRUE', 'P', 'PRESENT', '1', 'Y', 'YES', 'ATTENDED', 'X', 'PRESENT'].includes(value);
+  const value = String(val === undefined || val === null ? '' : val).trim().toUpperCase();
+  if (!value) return false;  // blank cells = absent
+  // Explicit absent markers
+  if (['FALSE', 'A', 'ABSENT', '0', 'N', 'NO', 'NOT ATTENDED', '-'].includes(value)) return false;
+  // Explicit present markers
+  if (['TRUE', 'P', 'PRESENT', '1', 'Y', 'YES', 'ATTENDED', 'X'].includes(value)) return true;
+  // Fallback: any non-empty non-zero value counts as present
+  return value !== '0' && value.length > 0;
 };
 
 const cleanHeader = (value, index) => {
@@ -219,20 +225,20 @@ export default function Upload() {
   const [scheduleNeeded, setScheduleNeeded] = useState(false);
   const [scheduleStart, setScheduleStart] = useState(() => new Date().toISOString().split('T')[0]);
   const [sessionDays, setSessionDays] = useState({ 0: false, 1: false, 2: true, 3: true, 4: false, 5: true, 6: false }); // Wed, Thu, Sat default
-  const [skipSecondSat, setSkipSecondSat] = useState(true);
-  const [skipFourthSat, setSkipFourthSat] = useState(true);
+  const [skipFirstSat, setSkipFirstSat] = useState(true);
+  const [skipThirdSat, setSkipThirdSat] = useState(true);
   const [pendingMappingInfo, setPendingMappingInfo] = useState(null);
   const [dayLabels, setDayLabels] = useState([]); // e.g. ["Day 1 Attendance", "Day 2 Attendance"]
 
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const DAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-  // Returns true if a given Date is a 2nd or 4th Saturday
+  // Returns true if a given Date is a 1st or 3rd Saturday
   const isHolidaySaturday = (date) => {
     if (date.getDay() !== 6) return false;
     const day = date.getDate();
     const weekNum = Math.ceil(day / 7);
-    return (skipSecondSat && weekNum === 2) || (skipFourthSat && weekNum === 4);
+    return (skipFirstSat && weekNum === 1) || (skipThirdSat && weekNum === 3);
   };
 
   // Generates session dates from startDate matching sessionDays, skipping holiday Saturdays
@@ -256,7 +262,7 @@ export default function Upload() {
     if (!dayLabels.length) return [];
     return generateSessionDates(scheduleStart, dayLabels.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleStart, sessionDays, skipSecondSat, skipFourthSat, dayLabels.length]);
+  }, [scheduleStart, sessionDays, skipFirstSat, skipThirdSat, dayLabels.length]);
 
   const handleXlsxFile = async (selectedFile) => {
     const buffer = await selectedFile.arrayBuffer();
@@ -417,20 +423,31 @@ export default function Upload() {
     setError('');
     setImportStatus('AI Agent is analyzing the file...');
     try {
-      const sample = csvData.slice(0, 8);
+      const sample = csvData.slice(0, 15);  // send more rows for better accuracy
       const result = await api.mapCsv(csvHeaders, sample);
       setMappingInfo(result);
       showToast('AI Mapping complete', 'success');
 
-      // Check if any mapped columns are "Day N" style labels or generic words like "true" (no real date)
+      // Check if any mapped columns are "Day N" style labels or real date headers (no parseable date as column name means schedule needed)
       const mapping = result.mapping || {};
       const dateCols = Object.keys(mapping).filter(k => String(mapping[k]).toLowerCase() === 'date');
-      // If a date column cannot be parsed as a real date, it is a day label requiring schedule logic
-      const hasDayLabels = dateCols.some(k => !parseDateString(k));
+
+      // A date column "needs schedule" if its header cannot be parsed as a real calendar date
+      // This covers: "Day 1 Attendance", "Day 2", and any other non-date labels
+      const isRealDate = (key) => {
+        // Check for common date patterns: DD/MM/YY, YYYY-MM-DD, MM-DD-YY, etc.
+        const s = key.trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return true;
+        if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s)) return true;
+        if (/^\d{1,2}-[A-Za-z]{3}-\d{2,4}$/.test(s)) return true;
+        const dt = new Date(s);
+        return !isNaN(dt.getTime()) && dt.getFullYear() > 2000;
+      };
+      const hasDayLabels = dateCols.some(k => !isRealDate(k));
 
       if (hasDayLabels) {
-        // Need schedule config — go to schedule step
-        setDayLabels(dateCols.filter(k => /^day\s*\d+/i.test(k)));
+        // Need schedule config — use ALL label-based date cols (not just "Day N" pattern)
+        setDayLabels(dateCols.filter(k => !isRealDate(k)));
         setPendingMappingInfo(result);
         setScheduleNeeded(true);
         setStep(2.5);
@@ -516,8 +533,9 @@ export default function Upload() {
         // Each date column = one attendance record per student
         dateKeys.forEach((key) => {
           const rawValue = lowerRow[key];
-          if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return;
-
+          // Note: we INCLUDE blank cells as Absent (do not skip them)
+          // Only skip if the entire row has no value for this key AND it's truly undefined (not just empty string)
+          
           // Use dateMap if provided (from schedule), else try to parse header as real date
           let dateLabel;
           if (dateMap && dateMap[key]) {
@@ -526,7 +544,11 @@ export default function Upload() {
             dateLabel = parseDateString(key) || key;
           }
 
-          const present = normalizePresent(rawValue);
+          // blank/null/undefined = absent; any truthy marker = present
+          const present = (rawValue !== undefined && rawValue !== null)
+            ? normalizePresent(rawValue)
+            : false;
+
           records.push({
             usn: usnValue,
             date: dateLabel,
@@ -772,12 +794,12 @@ export default function Upload() {
                     <p className="text-body-medium text-primary" style={{ marginBottom: 'var(--space-3)' }}>Saturday Holidays</p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={skipSecondSat} onChange={e => setSkipSecondSat(e.target.checked)} style={{ width: 16, height: 16 }} />
-                        <span className="text-body text-secondary">2nd Saturday is a holiday</span>
+                        <input type="checkbox" checked={skipFirstSat} onChange={e => setSkipFirstSat(e.target.checked)} style={{ width: 16, height: 16 }} />
+                        <span className="text-body text-secondary">1st Saturday is a holiday</span>
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={skipFourthSat} onChange={e => setSkipFourthSat(e.target.checked)} style={{ width: 16, height: 16 }} />
-                        <span className="text-body text-secondary">4th Saturday is a holiday</span>
+                        <input type="checkbox" checked={skipThirdSat} onChange={e => setSkipThirdSat(e.target.checked)} style={{ width: 16, height: 16 }} />
+                        <span className="text-body text-secondary">3rd Saturday is a holiday</span>
                       </label>
                     </div>
                   </div>

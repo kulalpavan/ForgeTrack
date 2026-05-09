@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, User, TrendingUp, Calendar, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatDate } from '../lib/utils';
 
 export default function History() {
   const [students, setStudents] = useState([]);
@@ -44,7 +45,9 @@ export default function History() {
 
         if (attendance) {
           attendance.forEach(a => {
-            attMap[a.sessionId._id] = a.present;
+            if (a.sessionId && a.sessionId._id) {
+              attMap[a.sessionId._id] = a.present;
+            }
             if (a.present) presentCount++;
           });
         }
@@ -197,7 +200,7 @@ export default function History() {
                 {studentData.historyList.slice(0, 30).map((ses, i) => (
                   <div 
                     key={i}
-                    title={`${new Date(ses.date).toLocaleDateString()}: ${ses.status === 'present' ? 'Present' : ses.status === 'absent' ? 'Absent' : 'Unmarked'}`}
+                    title={`${formatDate(ses.date)}: ${ses.status === 'present' ? 'Present' : ses.status === 'absent' ? 'Absent' : 'No Class'}`}
                     style={{ 
                       aspectRatio: '1/1', 
                       borderRadius: 'var(--radius-md)',
@@ -225,7 +228,7 @@ export default function History() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--bg-surface-inset)', border: 'none' }} />
-                  <span className="text-micro text-tertiary">No Session</span>
+                  <span className="text-micro text-tertiary">No Class</span>
                 </div>
               </div>
             </div>
@@ -255,7 +258,7 @@ export default function History() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <Calendar size={14} className="text-tertiary" />
                           <span className="text-body-sm text-secondary">
-                            {new Date(ses.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            {formatDate(ses.date)}
                           </span>
                         </div>
                       </td>
@@ -270,7 +273,7 @@ export default function History() {
                           <span className="pill pill-danger">Absent</span>
                         )}
                         {ses.status === 'unmarked' && (
-                          <span className="pill" style={{ background: 'var(--bg-surface-inset)', color: 'var(--text-tertiary)', border: '1px solid var(--border-subtle)' }}>Unmarked</span>
+                          <span className="pill" style={{ background: 'var(--bg-surface-inset)', color: 'var(--text-tertiary)', border: '1px solid var(--border-subtle)' }}>No Class</span>
                         )}
                       </td>
                     </tr>

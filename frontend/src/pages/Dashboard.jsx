@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Users, Calendar, CheckSquare, Clock, Zap, Upload } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Users, Calendar, CheckSquare, Clock, Zap, Upload, Edit3, Check, X } from 'lucide-react';
+import { formatDate } from '../lib/utils';
 import { api } from '../lib/api';
 
 function getTodayString() {
@@ -203,18 +204,45 @@ function AttendanceTrendChart() {
 function TodaysSessionCard() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     async function load() {
-      const today = getTodayString();
-      const sessions = await api.getSessions();
-      const found = sessions.find(s => s.date.split('T')[0] === today);
-      setSession(found);
-      setLoading(false);
+      try {
+        const today = getTodayString();
+        const sessions = await api.getSessions();
+        const found = sessions.find(s => s.date.split('T')[0] === today);
+        setSession(found);
+        if (found) setEditValue(found.topic);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
+
+  async function handleUpdateName() {
+    if (!editValue.trim() || editValue === session.topic) {
+      setIsEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.updateSession(session._id, { topic: editValue });
+      setSession(updated);
+      setIsEditing(false);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update session name: ' + (err.msg || err.message || 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="card-hero" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -230,9 +258,48 @@ function TodaysSessionCard() {
         </div>
       ) : session ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <h2 className="text-display-sm text-primary" style={{ marginBottom: '8px' }}>{session.topic}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            {isEditing ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                <input 
+                  className="input" 
+                  value={editValue} 
+                  onChange={e => setEditValue(e.target.value)}
+                  autoFocus
+                  style={{ height: '38px' }}
+                />
+                <button 
+                  className="btn-primary" 
+                  style={{ padding: '8px', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={handleUpdateName}
+                  disabled={saving}
+                >
+                  <Check size={18} />
+                </button>
+                <button 
+                  className="btn-secondary" 
+                  style={{ padding: '8px', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={() => { setIsEditing(false); setEditValue(session.topic); }}
+                  disabled={saving}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2 className="text-display-sm text-primary">{session.topic}</h2>
+                <button 
+                  className="btn-secondary" 
+                  style={{ padding: '4px', height: 'auto', background: 'none', border: 'none' }}
+                  onClick={() => setIsEditing(true)}
+                >
+                  <Edit3 size={16} className="text-tertiary hover:text-accent" />
+                </button>
+              </>
+            )}
+          </div>
           <p className="text-body text-secondary" style={{ marginBottom: '24px' }}>
-            {new Date(session.date).toLocaleDateString()}
+            {formatDate(session.date)}
           </p>
           <div style={{ marginTop: 'auto' }}>
             <button className="btn-primary" onClick={() => navigate('/attendance')}>

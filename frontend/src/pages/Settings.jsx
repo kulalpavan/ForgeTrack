@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   User, Bell, Shield, Palette, Save, LogOut,
   Moon, Globe, Mail, Loader, Lock, Eye, EyeOff,
   CheckCircle, AlertCircle, GraduationCap, Briefcase,
 } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
+import { useTheme } from '../lib/ThemeContext';
 import { api } from '../lib/api';
 
 /* ── Inline Toggle Component ───────────────────────────────── */
@@ -13,17 +14,20 @@ function Toggle({ checked, onChange }) {
     <button
       role="switch"
       aria-checked={checked}
-      onClick={() => onChange(!checked)}
+      onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
       style={{
-        width: '44px',
-        height: '24px',
+        width: '42px',
+        height: '22px',
         background: checked ? 'var(--accent-glow)' : 'var(--bg-surface-raised)',
         borderRadius: 'var(--radius-full)',
         position: 'relative',
         cursor: 'pointer',
-        border: `1px solid ${checked ? 'var(--accent-glow)' : 'var(--border-default)'}`,
-        transition: 'background 0.2s ease, border-color 0.2s ease',
+        border: 'none',
+        transition: 'background 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         flexShrink: 0,
+        padding: 0,
+        display: 'flex',
+        alignItems: 'center',
       }}
     >
       <div style={{
@@ -32,10 +36,10 @@ function Toggle({ checked, onChange }) {
         background: 'white',
         borderRadius: '50%',
         position: 'absolute',
-        top: '2px',
-        left: checked ? '22px' : '2px',
-        transition: 'left 0.2s ease',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+        left: '2px',
+        transform: checked ? 'translateX(20px)' : 'translateX(0)',
+        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
       }} />
     </button>
   );
@@ -68,7 +72,9 @@ function Banner({ type, message, onClose }) {
 
 /* ── Main Settings Page ─────────────────────────────────────── */
 export default function Settings() {
+  const { theme, setTheme, toggleTheme } = useTheme();
   const ctx = useOutletContext();
+  const isMobile = window.innerWidth < 768;
   const displayName = ctx?.displayName || '';
   const role = ctx?.role || 'mentor';
   const user = ctx?.user || null;
@@ -103,6 +109,17 @@ export default function Settings() {
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
   const [pwError, setPwError] = useState('');
+
+  // Appearance state
+  const [density, setDensity] = useState(localStorage.getItem('forgeDensity') || 'comfortable');
+
+  useEffect(() => {
+    const root = window.document.body;
+    root.classList.remove('density-comfortable', 'density-compact');
+    root.classList.add(`density-${density}`);
+    localStorage.setItem('forgeDensity', density);
+  }, [density]);
+
 
   const tabs = [
     { id: 'profile',       name: 'Profile',       icon: User },
@@ -218,10 +235,21 @@ export default function Settings() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--space-8)', alignItems: 'start' }}>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: isMobile ? 'column' : 'row', 
+        gap: 'var(--space-10)', 
+        alignItems: 'start' 
+      }}>
 
         {/* ── Sidebar Nav ───────────────────────────────────── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+        <div style={{ 
+          width: isMobile ? '100%' : '240px', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: 'var(--space-2)',
+          flexShrink: 0
+        }}>
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -234,13 +262,26 @@ export default function Settings() {
                 padding: '11px 14px',
                 borderRadius: 'var(--radius-lg)',
                 border: 'none',
-                background: activeTab === tab.id ? 'var(--bg-surface-raised)' : 'transparent',
+                background: activeTab === tab.id ? 'var(--bg-surface)' : 'transparent',
                 color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 textAlign: 'left',
-                transition: 'background 0.15s ease, color 0.15s ease',
+                transition: 'all 0.2s ease',
                 position: 'relative',
-                boxShadow: activeTab === tab.id ? 'inset 2px 0 0 var(--accent-glow)' : 'none',
+                boxShadow: activeTab === tab.id ? 'var(--shadow-card), inset 2px 0 0 var(--accent-glow)' : 'none',
+                border: activeTab === tab.id ? '1px solid var(--border-default)' : '1px solid transparent',
+              }}
+              onMouseEnter={e => {
+                if (activeTab !== tab.id) {
+                  e.currentTarget.style.background = 'var(--bg-surface-inset)';
+                  e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (activeTab !== tab.id) {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = 'transparent';
+                }
               }}
             >
               <tab.icon size={18} strokeWidth={1.75} style={{ flexShrink: 0 }} />
@@ -250,10 +291,28 @@ export default function Settings() {
             </button>
           ))}
 
+          {/* Support Section */}
+          {!isMobile && (
+            <div style={{ 
+              marginTop: 'var(--space-8)', 
+              padding: '16px', 
+              background: 'var(--bg-surface-inset)', 
+              borderRadius: 'var(--radius-xl)',
+              border: '1px solid var(--border-subtle)'
+            }}>
+              <p className="text-label text-tertiary" style={{ marginBottom: '8px' }}>Support</p>
+              <p className="text-caption text-secondary" style={{ marginBottom: '12px' }}>
+                Need help with your account or found a bug?
+              </p>
+              <button className="btn-secondary" style={{ width: '100%', justifyContent: 'center', fontSize: '12px', padding: '8px' }}>
+                View Documentation
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Content Panel ─────────────────────────────────── */}
-        <div className="card" style={{ gridColumn: 'span 1' }}>
+        <div className="card" style={{ flex: 1, minWidth: 0, border: '1px solid var(--border-subtle)' }}>
           <Banner type={banner.type} message={banner.message} onClose={() => setBanner({ type: '', message: '' })} />
 
           {/* ── PROFILE TAB ───────────────────────────────── */}
@@ -415,65 +474,115 @@ export default function Settings() {
 
               <div>
                 <label className="label">Interface Theme</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-4)', marginTop: 'var(--space-3)' }}>
-                  {/* Active theme */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-4)', marginTop: 'var(--space-3)' }}>
+                  {/* Cosmic Dark */}
                   <div
-                    className="card"
+                    onClick={() => setTheme('dark')}
                     style={{
-                      border: '2px solid var(--accent-glow)',
+                      border: theme === 'dark' ? '2px solid var(--accent-glow)' : '1px solid var(--border-default)',
                       cursor: 'pointer',
                       textAlign: 'center',
                       padding: 'var(--space-6)',
-                      background: 'var(--bg-surface-raised)',
+                      background: theme === 'dark' ? 'var(--bg-surface-raised)' : 'var(--bg-surface-inset)',
+                      borderRadius: 'var(--radius-xl)',
                       position: 'relative',
+                      transition: 'all 0.2s ease'
                     }}
                   >
-                    <span style={{
-                      position: 'absolute', top: '8px', right: '8px',
-                      fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em',
-                      color: 'var(--accent-glow)',
-                      background: 'var(--accent-glow-soft)',
-                      borderRadius: 'var(--radius-full)',
-                      padding: '2px 8px',
-                    }}>ACTIVE</span>
-                    <Moon size={24} style={{ color: 'var(--accent-glow)', margin: '0 auto 8px' }} />
+                    {theme === 'dark' && (
+                      <span style={{
+                        position: 'absolute', top: '8px', right: '8px',
+                        fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em',
+                        color: 'var(--accent-glow)',
+                        background: 'var(--accent-glow-soft)',
+                        borderRadius: 'var(--radius-full)',
+                        padding: '2px 8px',
+                      }}>ACTIVE</span>
+                    )}
+                    <div style={{ 
+                      width: '40px', height: '40px', background: '#0B0B11', 
+                      borderRadius: '50%', margin: '0 auto 12px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                    }}>
+                      <Moon size={20} style={{ color: '#F5F5F7' }} />
+                    </div>
                     <p className="text-caption text-primary" style={{ fontWeight: 600 }}>Cosmic Dark</p>
                   </div>
-                  {[
-                    { icon: Globe, label: 'Terminal' },
-                    { icon: Palette, label: 'System' },
-                  ].map(({ icon: Icon, label }) => (
-                    <div
-                      key={label}
-                      className="card"
-                      style={{
-                        background: 'var(--bg-surface-inset)',
-                        border: '1px solid var(--border-subtle)',
-                        cursor: 'not-allowed',
-                        opacity: 0.45,
-                        textAlign: 'center',
-                        padding: 'var(--space-6)',
-                      }}
-                    >
-                      <Icon size={24} style={{ color: 'var(--text-tertiary)', margin: '0 auto 8px' }} />
-                      <p className="text-caption text-tertiary">{label}</p>
-                      <p className="text-micro text-tertiary" style={{ marginTop: '4px' }}>Coming soon</p>
+
+                  {/* Light Bloom */}
+                  <div
+                    onClick={() => setTheme('light')}
+                    style={{
+                      border: theme === 'light' ? '2px solid var(--accent-glow)' : '1px solid var(--border-default)',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      padding: 'var(--space-6)',
+                      background: theme === 'light' ? 'var(--bg-surface-raised)' : 'var(--bg-surface-inset)',
+                      borderRadius: 'var(--radius-xl)',
+                      position: 'relative',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {theme === 'light' && (
+                      <span style={{
+                        position: 'absolute', top: '8px', right: '8px',
+                        fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em',
+                        color: 'var(--accent-glow)',
+                        background: 'var(--accent-glow-soft)',
+                        borderRadius: 'var(--radius-full)',
+                        padding: '2px 8px',
+                      }}>ACTIVE</span>
+                    )}
+                    <div style={{ 
+                      width: '40px', height: '40px', background: '#FFFFFF', 
+                      borderRadius: '50%', margin: '0 auto 12px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      border: '1px solid #E5E5E7'
+                    }}>
+                      <Globe size={20} style={{ color: '#6366F1' }} />
                     </div>
-                  ))}
+                    <p className="text-caption text-primary" style={{ fontWeight: 600 }}>Light Bloom</p>
+                  </div>
                 </div>
 
                 {/* Sidebar density */}
-                <div style={{ marginTop: 'var(--space-8)' }}>
+                <div style={{ marginTop: 'var(--space-10)' }}>
                   <label className="label">Interface Density</label>
-                  <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
-                    {['Comfortable', 'Compact'].map((d, i) => (
+                  <p className="text-caption text-tertiary" style={{ marginBottom: '12px' }}>
+                    Adjust the spacing and font sizing of the application interface.
+                  </p>
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '4px', 
+                    padding: '4px',
+                    background: 'var(--bg-surface-inset)',
+                    borderRadius: 'var(--radius-lg)',
+                    width: 'fit-content',
+                    border: '1px solid var(--border-default)'
+                  }}>
+                    {[
+                      { id: 'comfortable', label: 'Comfortable' },
+                      { id: 'compact', label: 'Compact' }
+                    ].map((d) => (
                       <button
-                        key={d}
-                        className={i === 0 ? 'btn-primary' : 'btn-secondary'}
-                        style={{ fontSize: '13px', padding: '8px 16px' }}
-                        disabled={i === 1}
+                        key={d.id}
+                        onClick={() => setDensity(d.id)}
+                        style={{ 
+                          fontSize: '13px', 
+                          padding: '8px 20px',
+                          border: 'none',
+                          borderRadius: 'var(--radius-md)',
+                          cursor: 'pointer',
+                          background: density === d.id ? 'var(--bg-surface)' : 'transparent',
+                          color: density === d.id ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                          fontWeight: 500,
+                          transition: 'all 0.2s ease',
+                          boxShadow: density === d.id ? 'var(--shadow-card)' : 'none'
+                        }}
                       >
-                        {d}
+                        {d.label}
                       </button>
                     ))}
                   </div>

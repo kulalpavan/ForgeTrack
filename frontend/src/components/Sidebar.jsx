@@ -4,6 +4,7 @@ import {
   Upload, UserCheck, Calendar, Settings, LogOut,
   Zap, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { useTheme } from '../lib/ThemeContext';
 import { api } from '../lib/api';
 
 /* ────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ const STUDENT_NAV = [
 ];
 
 export default function Sidebar({ role = 'mentor', displayName = '', collapsed = false, onCollapse }) {
+  const { theme, toggleTheme } = useTheme();
   const nav = role === 'mentor' ? MENTOR_NAV : STUDENT_NAV;
   const initials = displayName ? displayName.charAt(0).toUpperCase() : '?';
 

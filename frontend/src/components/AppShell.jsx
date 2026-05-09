@@ -4,8 +4,10 @@ import Sidebar from './Sidebar';
 import CommandPalette from './CommandPalette';
 import { api } from '../lib/api';
 import { LayoutDashboard, CheckSquare, BookOpen, UserCheck, Calendar, Settings, Command } from 'lucide-react';
+import { useTheme } from '../lib/ThemeContext';
 
 export default function AppShell() {
+  const { theme, toggleTheme } = useTheme();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -103,6 +105,7 @@ function BottomNav({ role }) {
     { to: '/me/settings',   icon: Settings,   label: 'Set' },
   ];
 
+  const { theme, toggleTheme } = useTheme();
   const items = role === 'mentor' ? MENTOR_ITEMS : STUDENT_ITEMS;
 
   return (

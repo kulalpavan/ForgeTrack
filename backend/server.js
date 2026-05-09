@@ -22,6 +22,13 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// In production, serve the frontend dist folder
+const path = require('path');
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+}
+
+
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'fake_key');
@@ -124,6 +131,27 @@ app.put('/api/auth/me', auth, async (req, res) => {
 });
 
 /* ── API ROUTES ────────────────────────────────────────────── */
+
+// Update Session (Mentor only)
+app.put('/api/sessions/:id', auth, async (req, res) => {
+  if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
+  try {
+    const { _id, ...updateData } = req.body;
+    console.log(`[SessionUpdate] Updating ${req.params.id} with:`, updateData);
+    
+    const session = await Session.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    if (!session) {
+      console.warn(`[SessionUpdate] Session not found: ${req.params.id}`);
+      return res.status(404).json({ msg: 'Session not found' });
+    }
+    
+    await logActivity(req.user.id, 'Session Updated', `Updated session: ${session.topic}`);
+    res.json(session);
+  } catch (err) {
+    console.error('[SessionUpdate] Error:', err);
+    res.status(500).json({ msg: err.message || 'Server error' });
+  }
+});
 
 // Stats Overview (Mentor only)
 app.get('/api/stats/overview', auth, async (req, res) => {
@@ -242,29 +270,41 @@ app.post('/api/ai/map-csv', auth, async (req, res) => {
     }
 
     const prompt = `
-You are a data mapping AI assistant for a student attendance system.
-You will receive CSV or spreadsheet column headers and sample rows.
-Map each source column to one of these target fields: student_name, usn, date, attendance_status. 
-For any other data columns that contain useful information (like Knowledge scores, Skill scores, Pre/Post assessments, etc.), map them to a cleaned, lowercased version of the header name (e.g., "knowledge_score", "skill_score").
-If the column is completely irrelevant, map it to "IGNORE".
+You are an expert data mapping AI for a student attendance system.
+You receive CSV/spreadsheet column headers and sample row data. Your job is to classify each column.
 
-CRITICAL: Use the EXACT column names provided in the 'Headers' list as keys in the 'mapping' object.
+TARGET FIELD TYPES:
+- "usn"             : Student ID / roll number / USN (often like "4SX21CS001")
+- "student_name"    : Student's full name
+- "email"           : Email address
+- "date"            : A date column — either a real date header (e.g. "15/4/26", "2026-04-15") OR a session label like "Day 1 Attendance", "Day 2 Attendance"
+- "attendance_status": A single column indicating presence for that row's date (standard format)
+- "IGNORE"          : Irrelevant columns (serial numbers, blank columns, remarks without data)
+- Any other meaningful column (scores, assessments) → use a snake_case name like "knowledge_score", "skill_score", "pre_assessment"
 
-If the data is a pivoted attendance sheet (where date values appear as column headers), mark each date-like header (e.g. "Day 1 Attendance", "15/4/26") as "date" and set is_pivoted to true.
-If the sheet is standard, map the column denoting presence/absence to "attendance_status".
-If a column contains date-like header values but no explicit date column, still map those fields as "date".
-If there are corresponding score columns for each day (e.g. "Day 1 Knowledge"), map them using a pattern like "date_knowledge" or "date_skill" if possible, otherwise just use a cleaned name.
-Detect the date_format (e.g. DD/MM/YY, MM/DD/YYYY, YYYY-MM-DD) and attendance_convention (e.g. TRUE/FALSE, P/A, 1/0, Present/Absent).
+FORMAT DETECTION RULES:
+1. PIVOTED FORMAT (is_pivoted: true): The spreadsheet has ONE ROW PER STUDENT, and EACH DATE or day-label is a separate column. 
+   - Signs: headers like "Day 1 Attendance", "Day 2 Attendance", "15/4/26", "04-15-26" appear as column names
+   - All such date/day-label columns should be mapped to "date"
+   - Values in these columns are attendance markers (TRUE, P, 1, Yes, X, etc.)
+2. STANDARD FORMAT (is_pivoted: false): ONE ROW PER ATTENDANCE RECORD. Has a single date column and a single status column.
 
-Return ONLY valid JSON in this exact format, with no markdown formatting, no surrounding backticks, and no extra commentary:
+CRITICAL RULES:
+- Use the EXACT column header string as the key in the mapping object (case-sensitive, spaces included)
+- If you see headers like "Day 1 Attendance", "Day 2 Attendance" → set is_pivoted: true and map each to "date"
+- Detect the attendance_convention from sample values (e.g. "TRUE/FALSE", "P/A", "1/0", "Present/Absent", "X/blank")
+- Detect date_format from sample data or header names (e.g. "DD/MM/YY", "YYYY-MM-DD")
+- Do NOT include markdown, backticks, or any text outside the JSON object
+
+Return ONLY this JSON structure:
 {
   "mapping": {
-    "Exact Header Name 1": "IGNORE",
-    "Exact Header Name 2": "student_name",
-    "Exact Header Name 3": "usn",
+    "<Exact Header 1>": "usn",
+    "<Exact Header 2>": "student_name",
+    "<Exact Header 3>": "email",
+    "<Exact Header 4>": "IGNORE",
     "Day 1 Attendance": "date",
     "Day 1 Knowledge(25)": "day_1_knowledge",
-    "Day 1 Skill(25)": "day_1_skill",
     "Pre Assessment Score(20)": "pre_assessment"
   },
   "is_pivoted": true,
@@ -273,7 +313,7 @@ Return ONLY valid JSON in this exact format, with no markdown formatting, no sur
 }
 
 Headers: ${JSON.stringify(headers)}
-Sample Data (first 3 rows): ${JSON.stringify(sampleData)}
+Sample Data (first 15 rows): ${JSON.stringify(sampleData)}
     `;
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
@@ -350,7 +390,7 @@ app.get('/api/attendance/:sessionId', auth, async (req, res) => {
   }
 });
 
-// Upsert Attendance
+// Upsert Attendance (single)
 app.post('/api/attendance', auth, async (req, res) => {
   if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
   const { studentId, sessionId, present } = req.body;
@@ -364,6 +404,33 @@ app.post('/api/attendance', auth, async (req, res) => {
   } catch (err) {
     console.error('API Error:', err);
     res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// Batch Upsert Attendance (fast bulk save for mark-attendance page)
+app.post('/api/attendance/batch', auth, async (req, res) => {
+  if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
+  const { sessionId, records } = req.body; // records: [{studentId, present}]
+  if (!sessionId || !Array.isArray(records)) {
+    return res.status(400).json({ msg: 'Missing sessionId or records' });
+  }
+  try {
+    const ops = records.map(({ studentId, present }) => ({
+      updateOne: {
+        filter: { studentId, sessionId },
+        update: { $set: { present: Boolean(present), markedAt: new Date() } },
+        upsert: true
+      }
+    }));
+    const result = await Attendance.bulkWrite(ops, { ordered: false });
+    res.json({ 
+      matched: result.matchedCount, 
+      upserted: result.upsertedCount, 
+      modified: result.modifiedCount 
+    });
+  } catch (err) {
+    console.error('Batch attendance error:', err);
+    res.status(500).json({ msg: 'Server error during batch save' });
   }
 });
 
@@ -389,16 +456,17 @@ function parseDateSafe(raw) {
   if (m) {
     let [, d, mo, y] = m;
     if (y.length === 2) y = '20' + y;
-    const iso = `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
-    const dt = new Date(iso);
-    return isNaN(dt) ? null : dt;
+    const dtMatch = new Date(Date.UTC(parseInt(y), parseInt(mo) - 1, parseInt(d)));
+    return isNaN(dtMatch) ? null : dtMatch;
   }
 
-  const dt = new Date(s);
-  return isNaN(dt) || dt.getFullYear() > 2100 ? null : dt;
+  const dtParsed = new Date(s);
+  if (isNaN(dtParsed) || dtParsed.getFullYear() > 2100) return null;
+  // Normalize any date to UTC midnight
+  return new Date(Date.UTC(dtParsed.getUTCFullYear() || dtParsed.getFullYear(), dtParsed.getUTCMonth() || dtParsed.getMonth(), dtParsed.getUTCDate() || dtParsed.getDate()));
 }
 
-// Bulk Import Attendance from AI Agent
+// Bulk Import Attendance from AI Agent (optimised with batched DB ops)
 app.post('/api/attendance/bulk-import', auth, async (req, res) => {
   if (req.user.role !== 'mentor') return res.status(403).json({ msg: 'Denied' });
   try {
@@ -412,83 +480,131 @@ app.post('/api/attendance/bulk-import', auth, async (req, res) => {
     let failed = 0;
     let skipped = 0;
 
-    // Cache sessions by topic label to avoid duplicate creation
-    const sessionCache = {};
+    // ── Phase 1: Resolve sessions (cached, sequential to avoid duplicate creates) ──
+    const sessionCache = {};  // label -> session document
+    const uniqueLabels = [...new Set(records.map(r => String(r.date || '').trim()).filter(Boolean))];
 
-    for (const row of records) {
+    for (const sessionLabel of uniqueLabels) {
+      if (skipSet.has(sessionLabel)) continue;
+      if (sessionCache[sessionLabel]) continue;
       try {
-        // 1. Find or create student by USN
-        const usnValue = String(row.usn || '').toUpperCase().trim();
-        if (!usnValue) { failed++; continue; }
-
-        // Update student name if available
-        let student = await Student.findOne({ usn: usnValue });
-        if (!student) {
-          student = await Student.create({
-            usn: usnValue,
-            name: row.student_name || usnValue,
-            email: row.email || '',
-            branchCode: row.branch_code || 'GEN',
-            isActive: true
-          });
-        } else if (row.student_name && student.name === usnValue) {
-          // Update name if it was previously just USN
-          await Student.findByIdAndUpdate(student._id, { name: row.student_name, email: row.email || student.email });
+        const realDate = parseDateSafe(sessionLabel);
+        let session;
+        if (realDate) {
+          const dayStart = new Date(realDate); dayStart.setHours(0, 0, 0, 0);
+          const dayEnd   = new Date(realDate); dayEnd.setHours(23, 59, 59, 999);
+          session = await Session.findOne({ date: { $gte: dayStart, $lte: dayEnd } });
+          if (!session) {
+            session = await Session.create({
+              date: realDate,
+              topic: `Session ${new Date(realDate).toLocaleDateString('en-IN')}`,
+              monthNumber: realDate.getMonth() + 1,
+              sessionType: 'offline'
+            });
+          }
+        } else {
+          session = await Session.findOne({ topic: sessionLabel });
+          if (!session) {
+            const dayMatch = sessionLabel.match(/(\d+)/);
+            const dayNum   = dayMatch ? parseInt(dayMatch[1]) : 0;
+            const baseDate = new Date('2026-01-01');
+            baseDate.setDate(baseDate.getDate() + dayNum - 1);
+            session = await Session.create({
+              date: baseDate,
+              topic: sessionLabel,
+              monthNumber: baseDate.getMonth() + 1,
+              sessionType: 'offline'
+            });
+          }
         }
+        sessionCache[sessionLabel] = session;
+      } catch (e) {
+        console.error('[import] Session resolve failed:', sessionLabel, e.message);
+      }
+    }
 
-        // 2. Resolve session — either by real date or by topic label
-        const sessionLabel = String(row.date || '').trim();
-        if (!sessionLabel) { failed++; continue; }
+    // ── Phase 2: Resolve students in parallel batches ──
+    const uniqueUSNs = [...new Set(records.map(r => String(r.usn || '').toUpperCase().trim()).filter(Boolean))];
+    const studentCache = {}; // usn -> student document
 
-        if (skipSet.has(sessionLabel)) { skipped++; continue; }
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < uniqueUSNs.length; i += BATCH_SIZE) {
+      const batch = uniqueUSNs.slice(i, i + BATCH_SIZE);
+      // Fetch all existing students in one query
+      const existing = await Student.find({ usn: { $in: batch } });
+      existing.forEach(s => { studentCache[s.usn] = s; });
 
-        let session = sessionCache[sessionLabel];
-        if (!session) {
-          const realDate = parseDateSafe(sessionLabel);
-          if (realDate) {
-            // Real date — find or create session by date
-            const dayStart = new Date(realDate); dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(realDate); dayEnd.setHours(23, 59, 59, 999);
-            session = await Session.findOne({ date: { $gte: dayStart, $lte: dayEnd } });
-            if (!session) {
-              session = await Session.create({
-                date: realDate,
-                topic: row.session_topic || `Session ${new Date(realDate).toLocaleDateString('en-IN')}`,
-                monthNumber: realDate.getMonth() + 1,
-                sessionType: 'offline'
-              });
-            }
-          } else {
-            // Label-based (e.g. "Day 1 Attendance") — find or create by topic
-            session = await Session.findOne({ topic: sessionLabel });
-            if (!session) {
-              // Extract day number for ordering
-              const dayMatch = sessionLabel.match(/(\d+)/);
-              const dayNum = dayMatch ? parseInt(dayMatch[1]) : 0;
-              // Use a base date offset so sessions are sortable
-              const baseDate = new Date('2026-01-01');
-              baseDate.setDate(baseDate.getDate() + dayNum - 1);
-              session = await Session.create({
-                date: baseDate,
-                topic: sessionLabel,
-                monthNumber: baseDate.getMonth() + 1,
-                sessionType: 'offline'
-              });
+      // Create missing students in parallel
+      const missing = batch.filter(usn => !studentCache[usn]);
+      if (missing.length > 0) {
+        // Get name/email from first row with this USN
+        const rowsByUsn = {};
+        records.forEach(r => {
+          const u = String(r.usn || '').toUpperCase().trim();
+          if (missing.includes(u) && !rowsByUsn[u]) rowsByUsn[u] = r;
+        });
+        await Promise.all(missing.map(async (usn) => {
+          try {
+            const r = rowsByUsn[usn] || {};
+            const s = await Student.create({
+              usn,
+              name: r.student_name || usn,
+              email: r.email || '',
+              branchCode: r.branch_code || 'GEN',
+              isActive: true
+            });
+            studentCache[usn] = s;
+          } catch (e) {
+            if (e.code === 11000) {
+              // Race condition: fetch if already created
+              const s = await Student.findOne({ usn });
+              if (s) studentCache[usn] = s;
+            } else {
+              console.error('[import] Student create failed:', usn, e.message);
             }
           }
-          sessionCache[sessionLabel] = session;
-        }
+        }));
+      }
 
-        // 3. Upsert attendance
-        await Attendance.findOneAndUpdate(
-          { studentId: student._id, sessionId: session._id },
-          { present: Boolean(row.present), markedBy: 'csv_import', markedAt: Date.now() },
-          { upsert: true, new: true }
-        );
-        imported++;
+      // Update names for students that only had USN before
+      await Promise.all(existing.map(async (s) => {
+        const r = records.find(rec => String(rec.usn || '').toUpperCase().trim() === s.usn);
+        if (r && r.student_name && s.name === s.usn) {
+          await Student.findByIdAndUpdate(s._id, { name: r.student_name, email: r.email || s.email });
+        }
+      }));
+    }
+
+    // ── Phase 3: Build bulkWrite ops for attendance ──
+    const bulkOps = [];
+    for (const row of records) {
+      const usnValue    = String(row.usn   || '').toUpperCase().trim();
+      const sessionLabel = String(row.date || '').trim();
+      if (!usnValue || !sessionLabel) { failed++; continue; }
+      if (skipSet.has(sessionLabel))   { skipped++; continue; }
+
+      const student = studentCache[usnValue];
+      const session  = sessionCache[sessionLabel];
+      if (!student || !session) { failed++; continue; }
+
+      bulkOps.push({
+        updateOne: {
+          filter: { studentId: student._id, sessionId: session._id },
+          update: { $set: { present: Boolean(row.present), markedBy: 'csv_import', markedAt: new Date() } },
+          upsert: true
+        }
+      });
+    }
+
+    // Execute attendance bulkWrite in batches
+    for (let i = 0; i < bulkOps.length; i += BATCH_SIZE) {
+      const batch = bulkOps.slice(i, i + BATCH_SIZE);
+      try {
+        const result = await Attendance.bulkWrite(batch, { ordered: false });
+        imported += result.upsertedCount + result.modifiedCount + result.matchedCount;
       } catch (e) {
-        console.error('[import] Row failed:', e.message, row);
-        failed++;
+        console.error('[import] bulkWrite batch failed:', e.message);
+        failed += batch.length;
       }
     }
 
@@ -561,4 +677,11 @@ app.delete('/api/materials/:id', auth, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+// Catch-all route to serve frontend index.html for any non-API routes in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, '../frontend', 'dist', 'index.html'));
+  });
+}
+
+app.listen(PORT, () => console.log(`ForgeTrack Server running on port ${PORT}`));

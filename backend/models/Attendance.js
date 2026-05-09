@@ -4,6 +4,7 @@ const attendanceSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Session', required: true },
   present: { type: Boolean, default: false },
+  markedBy: { type: String, default: 'manual' }, // 'manual' | 'csv_import'
   markedAt: { type: Date, default: Date.now }
 });
 

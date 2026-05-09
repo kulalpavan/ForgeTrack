@@ -1,0 +1,15 @@
+# Vercel ignores .gitignore rules by default.
+# We need frontend/dist to be uploaded for the Express static server.
+# Override: do NOT ignore the dist folder.
+!frontend/dist
+!frontend/dist/**
+
+# Still ignore these
+node_modules
+backend/node_modules
+frontend/node_modules
+.env
+backend/scratch
+push_env.bat
+push_env.js
+build.sh

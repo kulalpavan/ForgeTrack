@@ -53,50 +53,70 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/forgetrack'
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
-  const { email, identifier, password } = req.body;
-  const loginId = identifier || email; // Support both for backward compatibility
+  const { identifier, password } = req.body;
+  const loginId = String(identifier || '').toUpperCase().trim();
 
   try {
-    // Search by email OR usn
+    // 1. Search by User record first (Mentors and registered Students)
     let user = await User.findOne({
       $or: [
-        { email: loginId },
+        { email: identifier },
         { usn: loginId }
       ]
     }).populate('studentId');
 
-    if (!user) {
-      return res.status(400).json({ msg: 'Invalid Credentials' });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ msg: 'Invalid Credentials' });
-    }
-
-    const payload = {
-      user: { id: user.id, role: user.role, studentId: user.studentId?._id }
-    };
-
-    jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
-      if (err) {
-        console.error('JWT Signing Error:', err);
-        return res.status(500).json({ msg: 'Server Error' });
+    if (user) {
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (isMatch) {
+        return sendToken(user, res);
       }
-      res.json({ token, user: { 
-        id: user.id, 
-        email: user.email, 
-        usn: user.usn,
-        role: user.role, 
-        displayName: user.displayName || user.name || user.email || user.usn,
-        studentId: user.studentId?._id 
-      }});
-    });
+    }
+
+    // 2. Fallback: Search Student record (Auto-auth via USN)
+    // Every student can login with USN as both username and password
+    const student = await Student.findOne({ usn: loginId });
+    if (student && password.toUpperCase().trim() === loginId) {
+      // Mock a user object for the token
+      const mockUser = {
+        id: `temp_${student._id}`, // Pre-fixed to distinguish from real User records
+        _id: student._id,
+        role: 'student',
+        studentId: student._id,
+        usn: student.usn,
+        displayName: student.name
+      };
+      return sendToken(mockUser, res);
+    }
+
+    return res.status(400).json({ msg: 'Invalid Credentials' });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ msg: 'Server Error' });
   }
 });
+
+// Helper to sign and send JWT
+function sendToken(user, res) {
+  const payload = {
+    user: { 
+      id: user.id || user._id, 
+      role: user.role, 
+      studentId: user.studentId?._id || user.studentId 
+    }
+  };
+
+  jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
+    if (err) throw err;
+    res.json({ token, user: { 
+      id: user.id || user._id, 
+      email: user.email || '', 
+      usn: user.usn,
+      role: user.role, 
+      displayName: user.displayName || user.name || user.usn,
+      studentId: user.studentId?._id || user.studentId 
+    }});
+  });
+}
 
 // Get User Profile (Me)
 const auth = require('./middleware/auth');
@@ -684,4 +704,10 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => console.log(`ForgeTrack Server running on port ${PORT}`));
+// For local development
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`ForgeTrack Server running on port ${PORT}`));
+}
+
+// Export for Vercel
+module.exports = app;

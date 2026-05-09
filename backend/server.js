@@ -22,12 +22,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Serve frontend static files
-// Use FRONTEND_DIST_PATH if set (Vercel bundled), otherwise derive from __dirname
+// Serve frontend static files (local dev only; Vercel uses static routes)
 const path = require('path');
 const fs = require('fs');
 const distPath = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '../frontend/dist');
-if (fs.existsSync(distPath)) {
+if (!process.env.VERCEL && fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   console.log('[STATIC] Serving frontend from:', distPath);
 }
@@ -726,8 +725,9 @@ app.delete('/api/materials/:id', auth, async (req, res) => {
   }
 });
 
-// Catch-all: serve index.html for non-API routes (SPA routing support)
-if (fs.existsSync(distPath)) {
+// Catch-all: serve index.html for non-API routes (local dev SPA routing)
+// On Vercel, the static routes in vercel.json handle this
+if (!process.env.VERCEL && fs.existsSync(distPath)) {
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
       res.sendFile(path.join(distPath, 'index.html'));

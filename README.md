@@ -2,6 +2,8 @@
 
 > Attendance & Class Material Tracker for The Forge AI-ML Engineering Bootcamp
 
+**Live Application:** [https://forgetrack-jade.vercel.app/login](https://forgetrack-jade.vercel.app/login)
+
 ## Quick Start
 
 ```bash
